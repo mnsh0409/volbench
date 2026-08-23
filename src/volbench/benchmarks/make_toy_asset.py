@@ -63,9 +63,13 @@ START_DATE = "2019-01-02"
 # equity index), unconditional daily sigma = sqrt(2.4e-6 / 0.02) ~ 1.1%.
 OMEGA, ALPHA, BETA = 2.4e-6, 0.06, 0.92
 
-#: Intraday steps per day for the high/low path. Enough for a realistic range,
-#: few enough to keep generation instant.
-INTRADAY_STEPS = 13
+#: Intraday steps per day for the high/low path: one per minute of a 6.5-hour
+#: US equity session. Resolution matters more than it looks. Parkinson and
+#: Garman-Klass assume a continuously-observed path, so the high and low of a
+#: coarsely-sampled one sit inside the true range and the proxy is biased low
+#: — at 13 steps it came out ~30% below the return variance, which swamped the
+#: real effects the toy table is meant to show. At 390 the bias is ~4%.
+INTRADAY_STEPS = 390
 #: Overnight gap volatility as a fraction of the day's sigma.
 GAP_FRACTION = 0.3
 #: Price decimals. Deliberately fine enough that no day can round to high ==
