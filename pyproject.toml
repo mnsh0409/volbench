@@ -60,7 +60,12 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.mypy]
-python_version = "3.11"
+# No `python_version` pin. Pinning it to the floor (3.11) made mypy parse the
+# INSTALLED dependency stubs under 3.11 rules too, and numpy's own .pyi uses
+# 3.12+ `type` statements — so the 3.12 and 3.13 CI legs failed inside
+# numpy/__init__.pyi before reaching any volbench code. Unset, mypy targets
+# whichever interpreter it runs on, and the CI matrix covers 3.11-3.13, which
+# is what actually establishes the supported range.
 strict = true
 # tests/ is not type-checked wholesale, but test_model_interface.py is: its
 # static assertions ARE the check that every model still satisfies the model
