@@ -209,8 +209,20 @@ def test_unhashable_types_fail_loudly_rather_than_hashing_a_repr() -> None:
 
 
 def test_package_version_is_the_installed_one() -> None:
-    assert package_version() == "0.0.1"
-    assert base_config()["package_version"] == "0.0.1"
+    """The version in a config hash must be the real installed one.
+
+    Compared against ``volbench.__version__`` rather than a literal: pinning
+    the literal here meant every release bumped an unrelated test (it did, at
+    the M1 version bump). What actually matters is that the two agree — a
+    config hash carrying a *different* version from the package that produced
+    the numbers is a provenance bug — and that neither is the not-installed
+    fallback.
+    """
+    import volbench
+
+    assert package_version() == volbench.__version__
+    assert package_version() != "0+unknown", "volbench is not installed in this environment"
+    assert base_config()["package_version"] == "0.0.1"  # explicit override, not the installed one
 
 
 def test_array_digest_tracks_content_not_identity() -> None:

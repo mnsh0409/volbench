@@ -41,6 +41,7 @@ from numpy.typing import NDArray
 from volbench.dist import Distribution, Empirical, Normal, QuantileGrid
 from volbench.execute import Executor, SerialExecutor
 from volbench.metrics import qlike
+from volbench.models.base import FittedModel, ForecastModel
 from volbench.results import (
     ResultsStore,
     array_digest,
@@ -71,36 +72,21 @@ _FALLBACK_TAUS: Final = np.linspace(1.0 / 2048.0, 1.0 - 1.0 / 2048.0, 1024)
 # model interface
 # --------------------------------------------------------------------------
 #
-# Declared structurally and locally rather than imported from volbench.models,
-# which is being built in parallel (docs/phase1_prompts.md stream B). Keep
-# these signatures in sync with that stream at integration; they are written
-# to match its stated contract exactly.
-
-
-class FittedModel(Protocol):
-    """A model fitted at one origin, able to forecast forward from it."""
-
-    def predict(self, h: int) -> Distribution:
-        """Predictive distribution of the return ``h`` periods after the origin."""
-        ...
-
-
-class ForecastModel(Protocol):
-    """An unfitted model: identity, hyperparameters, and a fit method."""
-
-    @property
-    def name(self) -> str:
-        """Short model identifier, e.g. ``"garch11-normal"``."""
-        ...
-
-    def spec(self) -> dict[str, Any]:
-        """JSON-serializable hyperparameters. Must be stable across identical
-        constructions — it is hashed into the ``config_hash``."""
-        ...
-
-    def fit(self, train: NDArray[np.float64], **ctx: Any) -> FittedModel:
-        """Estimate parameters from ``train`` only."""
-        ...
+# During Phase 1 this module declared ``FittedModel``/``ForecastModel`` as its
+# own local Protocols, because ``volbench.models`` was being built in a
+# parallel stream (docs/phase1_prompts.md streams B and C). At M1 integration
+# the two were reconciled: there is now exactly ONE definition of the model
+# interface, in :mod:`volbench.models.base`, and this module imports it. They
+# are re-exported here so ``volbench.evaluate.ForecastModel`` keeps working.
+#
+# The reconciliation went C -> B (the local Protocol was widened to the real
+# classes' surface, gaining ``name``/``spec()`` on the *fitted* side), because
+# all four Phase 1 models honour the return-distribution convention that would
+# have forced the opposite direction.
+#
+# ``volbench.models.base`` is imported rather than ``volbench.models`` on
+# purpose: the package root of that subpackage pulls in ``arch`` and ``scipy``,
+# and evaluation should not depend on a model backend being installed.
 
 
 @runtime_checkable

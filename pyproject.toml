@@ -1,6 +1,6 @@
 [project]
 name = "volbench"
-version = "0.0.1"
+version = "0.1.0"
 description = "Leakage-safe, reproducible evaluation of probabilistic volatility and tail-risk forecasts ??from GARCH to time-series foundation models."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -62,7 +62,11 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src"]
+# tests/ is not type-checked wholesale, but test_model_interface.py is: its
+# static assertions ARE the check that every model still satisfies the model
+# Protocol (M1 integration, docs/design.md "Model interface"). Leaving it out
+# would make that file assert nothing at type-check time.
+files = ["src", "tests/test_model_interface.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

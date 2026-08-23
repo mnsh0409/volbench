@@ -14,13 +14,54 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from volbench.data import garman_klass, parkinson, realized_variance_from_bars, squared_return
+from volbench.data import (
+    garman_klass,
+    log_returns,
+    parkinson,
+    realized_variance_from_bars,
+    squared_return,
+)
 
 _LN2 = math.log(2.0)
 
 
 def _idx(n: int) -> pd.DatetimeIndex:
     return pd.date_range("2024-01-02", periods=n, freq="D", tz="UTC")
+
+
+class TestLogReturns:
+    """The A-to-C seam added at M1 integration: models and scoring speak in
+    returns, and everything downstream aligns positionally, so the shape and
+    the leading NaN matter as much as the arithmetic."""
+
+    def test_hand_computed_values(self) -> None:
+        close = pd.Series([100.0, 105.0, 103.0], index=_idx(3))
+        out = log_returns(close)
+        assert np.isnan(out.iloc[0])
+        assert out.iloc[1] == pytest.approx(math.log(1.05), rel=1e-12)
+        assert out.iloc[2] == pytest.approx(math.log(103.0 / 105.0), rel=1e-12)
+
+    def test_keeps_sign_unlike_squared_return(self) -> None:
+        close = pd.Series([100.0, 95.0, 99.0], index=_idx(3))
+        out = log_returns(close)
+        assert out.iloc[1] < 0.0
+        assert out.iloc[2] > 0.0
+
+    def test_stays_index_aligned_with_its_input(self) -> None:
+        # run_backtest matches returns to proxies positionally; a helper that
+        # dropped the leading gap would offset every forecast by one day.
+        close = pd.Series([100.0, 105.0, 103.0, 107.0], index=_idx(4))
+        out = log_returns(close)
+        assert len(out) == len(close)
+        assert out.index.equals(close.index)
+
+    def test_squared_return_is_exactly_its_square(self) -> None:
+        rng = np.random.default_rng(3)
+        close = pd.Series(100.0 * np.exp(np.cumsum(rng.normal(0, 0.01, 200))), index=_idx(200))
+        expected = log_returns(close) ** 2
+        pd.testing.assert_series_equal(
+            squared_return(close), expected.rename("squared_return"), check_names=True
+        )
 
 
 class TestSquaredReturn:

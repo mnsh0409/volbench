@@ -17,6 +17,7 @@ import pandas as pd  # type: ignore[import-untyped]
 
 __all__ = [
     "garman_klass",
+    "log_returns",
     "parkinson",
     "realized_variance_from_bars",
     "squared_return",
@@ -24,6 +25,27 @@ __all__ = [
 
 _LN2 = math.log(2.0)
 _GK_CLOSE_COEF = 2.0 * _LN2 - 1.0
+
+
+def log_returns(close: pd.Series) -> pd.Series:
+    """Close-to-close log returns: ``r_t = ln(C_t / C_{t-1})``, daily units.
+
+    Added at M1 integration: the models and the evaluator both speak in
+    *returns* (a model's ``predict`` is a distribution over the next return,
+    and CRPS/pinball/VaR are scored against the realized return), but the data
+    layer previously exposed only ``r_t^2``. Squaring and un-squaring loses the
+    sign, so every caller was rolling its own ``np.diff(np.log(...))`` — which
+    is exactly the hand-rolled index arithmetic this project tries not to have.
+
+    The first observation is NaN — there is no ``C_{t-1}`` for it — and is left
+    as a gap rather than dropped or filled, so the output stays index-aligned
+    with the input. That alignment is load-bearing: ``run_backtest`` matches
+    returns to proxies positionally, so a helper that silently shortened the
+    series by one would offset every forecast against the wrong realization.
+    """
+    c = close.astype(np.float64)
+    out: pd.Series = (np.log(c) - np.log(c.shift(1))).rename("log_return")
+    return out
 
 
 def squared_return(close: pd.Series) -> pd.Series:
@@ -34,9 +56,7 @@ def squared_return(close: pd.Series) -> pd.Series:
     gap rather than dropped or filled so the output stays index-aligned with
     the input.
     """
-    c = close.astype(np.float64)
-    log_ret = np.log(c) - np.log(c.shift(1))
-    out: pd.Series = (log_ret**2).rename("squared_return")
+    out: pd.Series = (log_returns(close) ** 2).rename("squared_return")
     return out
 
 
