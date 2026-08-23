@@ -1,27 +1,46 @@
 """Stooq daily OHLC downloader for the D-004 equity-index panel.
 
 STATUS AS VERIFIED 2026-08-23 (see docs/data_licenses.md): stooq.com's own
-CSV export endpoint (``https://stooq.com/q/d/l/``) currently answers
-automated HTTP requests with a JavaScript proof-of-work anti-bot challenge
-page instead of data — confirmed with a plain ``curl`` GET, not just an
-assumption. This module therefore does NOT attempt to solve or bypass that
-challenge (doing so would be deliberate anti-bot evasion, not a data-access
-question). ``fetch_stooq_csv``/``download_index`` are implemented against the
-documented CSV endpoint for the case where it *is* reachable (e.g. a
-differently-provisioned network, or Stooq lifting the gate), but today they
-will raise :class:`StooqBlockedError` almost everywhere. The supported path
-right now is :func:`ingest_manual_csv`: a human downloads the CSV from a
-browser (which solves the JS challenge) and hands the file to this module,
-which does the same parsing, validation, and caching either way.
+CSV export endpoint (``https://stooq.com/q/d/l/``) answers HTTP requests
+with a 503 JavaScript proof-of-work anti-bot challenge instead of data —
+confirmed three independent ways: a plain ``curl`` GET, a real Chrome
+session with live stooq.com cookies calling ``fetch()`` directly (got back
+an explicit "Access denied" body), and clicking the site's own "Download
+data in csv file..." link from the quote page in that same session (still
+503). This module does NOT attempt to solve or bypass that challenge
+(doing so would be deliberate anti-bot evasion, not a data-access
+question). ``fetch_stooq_csv``/``download_index`` are implemented against
+the documented CSV endpoint for the case where it *is* reachable (e.g. a
+differently-provisioned network, or Stooq lifting the gate), but today
+they will raise :class:`StooqBlockedError` almost everywhere. The
+supported path right now is :func:`ingest_manual_csv`: a human downloads
+the CSV from a browser (which solves the JS challenge) and hands the file
+to this module, which does the same parsing, validation, and caching
+either way. Note the *interactive* HTML quote/history pages (unlike the
+CSV endpoint) are not gated at all — that's how the verification below was
+done and how a human can always get the numbers by hand if needed.
 
-Symbol verification caveat: because the endpoint is blocked, the ticker map
-below could not be confirmed end-to-end against a live response. ``^spx``,
-``^dji``, and ``^dax`` are corroborated by third-party usage (e.g. the
-pandas-datareader Stooq test suite); ``^ndx`` (vs. ``^ndq``), the FTSE 100
-code (community sources disagree between ``^ftse``, ``^ftm``, and
-``^uk100``), ``^twse`` (vs. ``^twii``), and ``^kospi`` are best-effort and
-UNVERIFIED — confirm against a real response (e.g. via a manual browser
-download through :func:`ingest_manual_csv`) before trusting this panel.
+Symbol verification: confirmed live on 2026-08-23 against stooq.com's
+"Main Indices" listing (``https://stooq.com/t/?i=510``) and each index's
+own quote page. Three of the originally-guessed symbols turned out to be
+retired: Stooq no longer serves the licensed S&P Dow Jones / FTSE index
+series directly (consistent with the ToS §6.1 S&P DJI licensing terms in
+docs/data_licenses.md) and replies with unlicensed CFD-tracked proxy
+instruments instead:
+
+- ``^spx`` -> no longer exists; redirects with "Symbol ^SPX został
+  zmieniony na ^USLC" (renamed to ^USLC, "U.S. Large Cap CFD").
+- ``^dji`` -> renamed to ``^usbc`` ("U.S. Blue Chip CFD").
+- ``^ftse`` -> doesn't exist at all ("nie istnieje w bazie"); the FTSE 100
+  slot in Stooq's Main Indices list is now ``^uklc`` ("United Kingdom
+  Large Cap CFD"), the same rebrand pattern as the two above.
+- ``^ndx``, ``^dax``, ``^cac``, ``^nkx``, ``^hsi``, ``^twse``, ``^kospi``
+  all confirmed correct and unchanged.
+
+This is a data-provenance change worth a human decision, not just a symbol
+fix: the SPX/DJI/FTSE100 slots in the D-004 panel now resolve to Stooq's
+own CFD proxies, not the licensed indices docs/research_design.md
+describes. Flagged in docs/data_licenses.md rather than resolved here.
 
 Never commit downloaded data: caches live under a gitignored directory
 (default ``data/cache/stooq/``) and are never vendored with the package.
@@ -54,18 +73,20 @@ __all__ = [
 STOOQ_CSV_URL = "https://stooq.com/q/d/l/"
 
 #: canonical asset id -> Stooq ticker for the D-004 core equity-index panel.
-#: See the module docstring: several of these are unverified best-effort guesses.
+#: All confirmed live on 2026-08-23 (see module docstring). SPX/DJI/FTSE map
+#: to Stooq's unlicensed CFD proxies, not the literal licensed indices — a
+#: provenance change flagged in docs/data_licenses.md, not silently absorbed.
 STOOQ_INDEX_SYMBOLS: dict[str, str] = {
-    "SPX": "^spx",  # S&P 500 — corroborated
-    "NDX": "^ndx",  # NASDAQ-100 — UNVERIFIED (possibly ^ndq for the Composite)
-    "DJI": "^dji",  # Dow Jones Industrial Average — corroborated
-    "DAX": "^dax",  # DAX — corroborated
-    "FTSE": "^ftse",  # FTSE 100 — UNVERIFIED (sources also suggest ^ftm / ^uk100)
-    "CAC": "^cac",  # CAC 40 — UNVERIFIED
-    "NKX": "^nkx",  # Nikkei 225 — UNVERIFIED
-    "HSI": "^hsi",  # Hang Seng — UNVERIFIED
-    "TWSE": "^twse",  # TAIEX (Taiwan) — UNVERIFIED (sources also suggest ^twii)
-    "KOSPI": "^kospi",  # KOSPI Composite (South Korea) — UNVERIFIED
+    "SPX": "^uslc",  # was ^spx: Stooq retired it, redirects to ^USLC "U.S. Large Cap CFD"
+    "NDX": "^ndx",  # NASDAQ-100 — confirmed
+    "DJI": "^usbc",  # was ^dji: Stooq retired it, redirects to ^USBC "U.S. Blue Chip CFD"
+    "DAX": "^dax",  # DAX — confirmed
+    "FTSE": "^uklc",  # ^ftse doesn't exist; Main Indices lists FTSE 100 as ^UKLC "UK Large Cap CFD"
+    "CAC": "^cac",  # CAC 40 — confirmed
+    "NKX": "^nkx",  # Nikkei 225 — confirmed
+    "HSI": "^hsi",  # Hang Seng — confirmed
+    "TWSE": "^twse",  # TAIEX (Taiwan) — confirmed
+    "KOSPI": "^kospi",  # KOSPI Composite (South Korea) — confirmed
 }
 
 _REQUEST_HEADERS = {"User-Agent": "volbench-research/0.1 (+mailto:martin.ai.nlp@gmail.com)"}
