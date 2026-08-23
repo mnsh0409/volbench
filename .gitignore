@@ -15,7 +15,8 @@ build/
 htmlcov/
 
 # Data & results (never commit data; adapters download with checksums)
-data/
+# Root-anchored: bare "data/" would also match src/volbench/data/ (source code).
+/data/
 results/
 *.parquet
 
