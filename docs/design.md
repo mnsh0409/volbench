@@ -171,6 +171,25 @@
     `@pytest.mark.timegpt`) and cannot pin remote weights; it stays out of
     the headline as the research design says.
 
+- **PatchTST** (`models/patchtst.py`, added on `feat/p2-models-tsfm`): the
+  one trained deep-learning baseline — chosen over N-BEATS on the flagged
+  assumption that architectural proximity to the patch-based TSFMs is the
+  more useful comparison. Small fixed channel-independent PatchTST (64-step
+  lookback, 16/8 patches, d_model 32, 2 layers, ~20k parameters) on
+  instance-normalized log RV; Adam/MSE under a bounded, hashed budget (max
+  100 epochs, early stop on the chronologically-last 20% of windows,
+  patience 10, best weights restored); Duan smearing retransformation with a
+  per-horizon factor from the training residuals; output
+  `Normal(0, sqrt(vhat))`. Deterministic by construction (explicit-matmul
+  attention, `use_deterministic_algorithms`, seeded batches/dropout) and
+  pinned bit-identical twice on CPU and GPU; across devices, dropout draws
+  from each device's own RNG stream, so results reproduce per device class
+  (with `dropout=0` CPU and GPU agree to ~1e-8), and `device` is not hashed. **No `update`:** re-conditioning
+  a trained net without re-estimation is not well defined, so it runs frozen
+  between refits and `conditioned_through == fit_origin` on every row.
+  Training windows are cut from the fit array only (last target = the
+  origin), which is the leakage-check focus for a dataloader.
+
   **Diverged:** the plan's model list names these as adapters of a generic
   kind; as built they are RV-fed, like HAR, not return-fed — the same
   type-uniform / meaning-divergent interface noted for HAR above, now shared
@@ -224,6 +243,9 @@ Settled after M1 report §4.3 (open at M1, implemented on
   every model: re-conditioning is a no-op precisely when nothing new has been
   observed. That is what makes (b) above hold (`tests/test_model_interface.py`,
   `tests/test_models_update.py`, `tests/test_recondition.py`).
+- **Frozen by design.** `PatchTST` implements no `update`; between refits
+  the evaluator holds its forecast and records `conditioned_through ==
+  fit_origin`. This is the documented exception to the invariant above.
 - **Zero-shot models.** For the TSFM adapters `fit` and `update` are the same
   operation (record the trailing context), so `refit_every` changes no number
   — pinned in `tests/test_models_tsfm_common.py` by running the same cell at
@@ -324,7 +346,8 @@ proxies and `log_returns`, `Origin`/`RollingOriginSplitter`, the four baseline
 model classes and their fitted types, the four zero-shot adapters
 (`Chronos`/`TimesFM`/`Moirai`/`TimeGPT`, fitted type `FittedTSFM`; their
 shared base `ZeroShotRVModel`, `TSFMBackend` and `TimesFMForecastOptions`
-stay in `volbench.models`) plus `ForecastModel`/`FittedModel`,
+stay in `volbench.models`), `PatchTST`/`FittedPatchTST`, plus
+`ForecastModel`/`FittedModel`,
 `run_backtest`/`forecast_moments`/`DEFAULT_LEVELS`/`SupportsUpdate`/
 `ModelFactory`, `ResultsStore` and the config-hash helpers,
 `Executor`/`SerialExecutor`, and `mse`/`qlike`/`pinball`.

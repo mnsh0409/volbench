@@ -25,7 +25,17 @@ from numpy.typing import NDArray
 
 from volbench import evaluate as evaluate_module
 from volbench.dist import Distribution
-from volbench.models import EWMA, GARCH, HAR, Chronos, Moirai, NaiveVol, TimeGPT, TimesFM
+from volbench.models import (
+    EWMA,
+    GARCH,
+    HAR,
+    Chronos,
+    Moirai,
+    NaiveVol,
+    PatchTST,
+    TimeGPT,
+    TimesFM,
+)
 from volbench.models.base import FittedModel, ForecastModel
 from volbench.models.tsfm_common import RVQuantileForecast, TSFMBackend, ZeroShotRVModel
 
@@ -50,6 +60,23 @@ class _FakeTSFMBackend:
 
 _BACKEND: TSFMBackend = _FakeTSFMBackend()
 
+#: PatchTST at CI-smoke size: two epochs of a tiny net on CPU. Its fit needs
+#: torch, which the CI legs install (`--extra torch-cpu`); elsewhere the tests
+#: that fit it importorskip.
+_PATCHTST = PatchTST(
+    lookback=16,
+    patch_len=8,
+    stride=4,
+    d_model=8,
+    n_heads=2,
+    n_layers=1,
+    d_ff=16,
+    max_epochs=2,
+    patience=2,
+    batch_size=16,
+    device="cpu",
+)
+
 # Static conformance: annotating with the Protocol is the assertion. If any
 # class drops `name`/`spec()`/`fit()`, or changes a signature, mypy fails here.
 UNFITTED: list[ForecastModel] = [
@@ -61,7 +88,13 @@ UNFITTED: list[ForecastModel] = [
     TimesFM(backend=_BACKEND),
     Moirai(backend=_BACKEND),
     TimeGPT(backend=_BACKEND),
+    _PATCHTST,
 ]
+
+#: The models that re-condition between refits. PatchTST is the deliberate
+#: exception (models/patchtst.py: re-conditioning a trained net without
+#: re-estimation is not well defined) and runs frozen.
+UPDATABLE: list[ForecastModel] = [m for m in UNFITTED if not isinstance(m, PatchTST)]
 
 #: HAR and the zero-shot foundation-model adapters are the exception: they fit
 #: on a realized-variance series, not returns (see models/har.py and
@@ -79,7 +112,11 @@ def _realized_variance(n: int = 300, seed: int = 7) -> np.ndarray:
 
 
 def _train_for(model: ForecastModel) -> np.ndarray:
-    return _realized_variance() if isinstance(model, HAR | ZeroShotRVModel) else _returns()
+    if isinstance(model, PatchTST):
+        pytest.importorskip("torch")
+    if isinstance(model, HAR | ZeroShotRVModel | PatchTST):
+        return _realized_variance()
+    return _returns()
 
 
 class TestOneDefinition:
@@ -136,7 +173,11 @@ class TestUpdateCapability:
     `recondition="daily"`.
     """
 
-    @pytest.mark.parametrize("model", UNFITTED, ids=lambda m: m.name)
+    def test_patchtst_is_the_documented_exception(self) -> None:
+        fitted = _PATCHTST.fit(_train_for(_PATCHTST))
+        assert not isinstance(fitted, evaluate_module.SupportsUpdate)
+
+    @pytest.mark.parametrize("model", UPDATABLE, ids=lambda m: m.name)
     def test_every_model_supports_update(self, model: ForecastModel) -> None:
         fitted = model.fit(_train_for(model))
         assert isinstance(fitted, evaluate_module.SupportsUpdate)
@@ -144,7 +185,7 @@ class TestUpdateCapability:
         assert isinstance(again, FittedModel)
         assert isinstance(again, evaluate_module.SupportsUpdate)  # and so is its successor
 
-    @pytest.mark.parametrize("model", UNFITTED, ids=lambda m: m.name)
+    @pytest.mark.parametrize("model", UPDATABLE, ids=lambda m: m.name)
     def test_update_on_the_fit_window_reproduces_the_fit_exactly(
         self, model: ForecastModel
     ) -> None:

@@ -6,8 +6,9 @@ Every model here fits on a plain 1-D `numpy` array — never a `TimeSeriesFrame`
 `volbench.data` or `volbench.evaluate`.
 
 The zero-shot foundation-model adapters (`Chronos`, `TimesFM`, `Moirai`,
-`TimeGPT`; see `tsfm_common.py` for the shared contract) import their heavy
-backends lazily, so importing this package never needs the `tsfm` extra.
+`TimeGPT`; see `tsfm_common.py` for the shared contract) and the trained
+`PatchTST` baseline import their heavy backends lazily, so importing this
+package never needs torch or the `tsfm` extra.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from volbench.models.ewma import EWMA, FittedEWMA
 from volbench.models.garch import GARCH, FittedGARCH, gjr_garch
 from volbench.models.har import HAR, FittedHAR
 from volbench.models.naive import FittedNaiveVol, NaiveVol
+from volbench.models.patchtst import FittedPatchTST, PatchTST
 from volbench.models.tsfm_chronos import Chronos
 from volbench.models.tsfm_common import FittedTSFM, TSFMBackend, ZeroShotRVModel
 from volbench.models.tsfm_moirai import Moirai
@@ -33,10 +35,12 @@ __all__ = [
     "FittedHAR",
     "FittedModel",
     "FittedNaiveVol",
+    "FittedPatchTST",
     "FittedTSFM",
     "ForecastModel",
     "Moirai",
     "NaiveVol",
+    "PatchTST",
     "TSFMBackend",
     "TimeGPT",
     "TimesFM",
