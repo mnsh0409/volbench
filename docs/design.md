@@ -217,12 +217,15 @@ the `package_version()` that enters every config hash.
 4. Scalers/feature transforms fit on train windows only, inside the splitter's
    contract.
 
-**Not yet an enforced invariant:** `run_backtest` aligns `series`, `proxy` and
-`fit_series` *positionally* and validates only their length. One calendar must
-govern all three; two same-length arrays off by a day would silently score
-every forecast against the following day's realization. `benchmarks/toy.py`
-asserts index equality before converting to arrays — the pattern to copy — but
-nothing forces a caller to.
+**Enforced since `m2/evaluator-hardening` (was open at M1, report §4.6):**
+`run_backtest` aligns `series`, `proxy` and `fit_series` *positionally*, so it
+now requires them to be on one calendar. Pandas inputs must carry identical
+indexes — values and order, checked with `Index.equals`, the first mismatching
+position named in the `ValueError`; mixing an indexed input with a bare array
+is refused. Bare arrays for *every* input remain accepted as an explicit
+positional opt-in (only lengths are checked), because they carry no calendar
+to compare. `benchmarks/toy.py` passes indexed Series so its path exercises
+the guard, and keeps its own index assertion as a redundant belt.
 
 ## Open questions (carried into Phase 2)
 - [x] Closed-form vs. sample-based CRPS — settled: closed form for `Normal`,

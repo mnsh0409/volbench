@@ -371,6 +371,74 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------
 
 
+def _calendar_of(values: object) -> pd.Index | None:
+    """The index a pandas input carries, or ``None`` for a bare array."""
+    index = getattr(values, "index", None)
+    return index if isinstance(index, pd.Index) else None
+
+
+def _first_mismatch(reference: pd.Index, other: pd.Index) -> int:
+    """Position of the first entry where two indexes disagree.
+
+    If one index is a prefix of the other, that is the position where the
+    shorter one runs out.
+    """
+    n = min(len(reference), len(other))
+    if n:
+        equal = np.asarray(reference[:n].to_numpy() == other[:n].to_numpy(), dtype=bool)
+        unequal = np.flatnonzero(~equal)
+        if unequal.size:
+            return int(unequal[0])
+    return n
+
+
+def _require_one_calendar(*inputs: tuple[str, object]) -> None:
+    """Refuse inputs that are not on one shared calendar.
+
+    ``run_backtest`` aligns its inputs by position, so the only way to know
+    that position ``i`` of the proxy is the same day as position ``i`` of the
+    returns is for both to carry that day. Pandas inputs must therefore have
+    identical indexes — values and order, not just length — and mixing an
+    indexed input with a bare array is refused rather than guessed at.
+
+    Bare arrays across the board are still accepted: they carry no calendar
+    to check, so passing them is the caller's explicit statement that the
+    alignment is theirs to guarantee. ``_as_series`` still checks lengths.
+    """
+    calendars = [(name, _calendar_of(values)) for name, values in inputs if values is not None]
+    indexed = [(name, index) for name, index in calendars if index is not None]
+    if not indexed:
+        return
+    bare = [name for name, index in calendars if index is None]
+    if bare:
+        raise ValueError(
+            f"{indexed[0][0]} carries a pandas index but {', '.join(bare)} is a bare array: "
+            "pass every input on one shared index so their alignment can be checked, or "
+            "every input as a bare array to take responsibility for positional alignment "
+            "yourself"
+        )
+    reference_name, reference = indexed[0]
+    for name, index in indexed[1:]:
+        if reference.equals(index):
+            continue
+        position = _first_mismatch(reference, index)
+        if position < len(reference) and position < len(index):
+            where = (
+                f"{reference_name} has {reference[position]!s} and {name} has {index[position]!s}"
+            )
+        elif position < len(reference):
+            where = f"{name} has run out (length {len(index)}) while {reference_name} continues"
+        else:
+            where = f"{reference_name} has run out (length {len(reference)}) while {name} continues"
+        raise ValueError(
+            f"{name} is not on the same calendar as {reference_name}: first mismatch at "
+            f"position {position}, where {where}. run_backtest aligns its inputs by "
+            "position, so same-length inputs on different calendars would silently score "
+            "every forecast against the wrong day's realization — put "
+            f"{reference_name}, {name} and any fit_series on one shared index"
+        )
+
+
 def _as_series(values: object, name: str, expected: int | None = None) -> NDArray[np.float64]:
     array = np.asarray(values, dtype=np.float64)
     if array.ndim != 1:
@@ -419,12 +487,18 @@ def run_backtest(
         are expected (thin trading days, missing intraday data) and are
         recorded rather than dropped.
 
-        Alignment is positional, and only equal *length* is checked. One
-        calendar must therefore govern ``series``, ``proxy`` and
-        ``fit_series``: two same-length arrays off by a day would silently
-        score each forecast against the following day's realization, which is
-        leakage that no test here can see. Calendars are the data layer's job
-        (docs/design.md, ``TimeSeriesFrame``); pass arrays that came from one.
+        Alignment is positional, so one calendar must govern ``series``,
+        ``proxy`` and ``fit_series``. Pass them as pandas objects on one shared
+        index and that is *checked*: the indexes must be identical in values
+        and order, and a mismatch raises naming the first offending position.
+        Mixing an indexed input with a bare array is refused. Bare arrays for
+        every input are still accepted — they carry no calendar to check, so
+        only lengths are compared and the alignment is the caller's to
+        guarantee. The failure this guards against is silent: two same-length
+        inputs off by a day would score each forecast against the following
+        day's realization, which is leakage no other test here can see.
+        Calendars are the data layer's job (docs/design.md,
+        ``TimeSeriesFrame``); pass series that came from one.
     splitter:
         The only sanctioned source of train/test indices (CLAUDE.md rule 1).
     seed:
@@ -476,6 +550,7 @@ def run_backtest(
     if not all(0.0 < level < 1.0 for level in levels_tuple):
         raise ValueError(f"levels must lie strictly inside (0, 1), got {levels_tuple}")
 
+    _require_one_calendar(("series", series), ("proxy", proxy), ("fit_series", fit_series))
     series_array = _as_series(series, "series")
     proxy_array = _as_series(proxy, "proxy", expected=series_array.size)
     fit_array = (

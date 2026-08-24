@@ -97,11 +97,12 @@ class ToyBenchmarkResult:
     config_hashes: dict[str, str]
 
 
-def load_series(path: Path = DEFAULT_PATH) -> tuple[np.ndarray, np.ndarray]:
+def load_series(path: Path = DEFAULT_PATH) -> tuple[pd.Series, pd.Series]:
     """Ingest the fixture and return ``(returns, parkinson_variance)``.
 
-    Both arrays are on one calendar and the same length, which
-    ``run_backtest`` relies on (it aligns positionally). The first bar is
+    Both come back as pandas Series still carrying the fixture's calendar, so
+    that ``run_backtest`` — which aligns its inputs by position — can verify
+    they are on one index rather than take it on trust. The first bar is
     dropped from *both* because ``log_returns`` has no ``C_{t-1}`` for it —
     a leading-edge trim of unusable rows, applied identically to every series,
     which moves no information backwards in time.
@@ -109,20 +110,17 @@ def load_series(path: Path = DEFAULT_PATH) -> tuple[np.ndarray, np.ndarray]:
     frame = load_ohlc_csv(path, asset_id=ASSET_ID, source="synthetic")
     return_series = log_returns(frame.close)
     proxy_series = parkinson(frame.high, frame.low)
-    # Alignment is asserted, not assumed. `run_backtest` matches returns to
-    # proxies positionally and only checks equal *length*, so two series that
-    # silently fell out of step — one of these helpers gaining a `dropna()`,
-    # say — would score every forecast against the wrong day's realization and
-    # no length check would notice. Both are derived from one frame's index,
-    # so demanding they still carry that index costs nothing and closes the
-    # gap the run_backtest docstring warns about.
+    # Belt to run_backtest's braces: it re-checks the calendars on the way in,
+    # but two helpers that fell out of step — one gaining a `dropna()`, say —
+    # is a data-layer bug, and this is the data-layer side of the seam.
     if not return_series.index.equals(proxy_series.index):
         raise ValueError("returns and proxy are not on the same calendar")
-    returns = return_series.to_numpy(dtype=np.float64)[1:]
-    proxy = proxy_series.to_numpy(dtype=np.float64)[1:]
-    if not np.isfinite(returns).all():
+    returns = return_series.iloc[1:]
+    proxy = proxy_series.iloc[1:]
+    if not np.isfinite(returns.to_numpy(dtype=np.float64)).all():
         raise ValueError("returns contain non-finite values after the leading trim")
-    if not (np.isfinite(proxy) & (proxy > 0.0)).all():
+    proxy_values = proxy.to_numpy(dtype=np.float64)
+    if not (np.isfinite(proxy_values) & (proxy_values > 0.0)).all():
         raise ValueError("parkinson proxy must be finite and strictly positive")
     return returns, proxy
 
