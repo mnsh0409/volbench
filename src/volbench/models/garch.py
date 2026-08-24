@@ -12,12 +12,15 @@ units. The catch: `res.forecast(...).variance` is reported in the
 before returning is required, or this would silently violate the
 daily-units-only rule (CLAUDE.md rule 2).
 
-Student-t innovations: the natural predictive distribution is a scaled
-Student-t, for which `Distribution` has no closed-form constructor. We use
-`Distribution.from_quantiles` over a fixed grid rather than
-`from_samples`: it needs no RNG seed, so the same fitted model scores
-bit-identically across runs (CLAUDE.md rule 3), and a fine grid's CRPS is
-close to exact (Laio & Tamea, 2007) without Monte Carlo sampling error.
+Student-t innovations: the predictive distribution is the parametric
+`StudentT` (location 0, `nu` from the fit, scale derived from the conditional
+variance via `StudentT.from_variance`, so that its `variance()` is exactly
+`arch`'s conditional variance). Until m2/evaluator-hardening this was a
+199-point quantile grid over tau in [0.005, 0.995]; the evaluator's moments of
+that grid truncated the tails, and a *perfectly specified* forecast could not
+score below a QLIKE floor of 0.0407 at nu=3 (docs/M1_REPORT.md §4.2). The
+parametric object has closed-form moments and CRPS and needs no RNG, so the
+same fitted model still scores bit-identically across runs (CLAUDE.md rule 3).
 
 Non-convergence: if the optimizer fails to converge (`convergence_flag !=
 0`, including a degenerate fitted `nu <= 2` for Student-t, where the
@@ -39,9 +42,8 @@ import numpy as np
 from arch import arch_model
 from arch.univariate.base import ARCHModelResult
 from numpy.typing import NDArray
-from scipy import stats  # type: ignore[import-untyped]
 
-from volbench.dist import Distribution, Normal
+from volbench.dist import Distribution, Normal, StudentT
 from volbench.models.ewma import EWMA, FittedEWMA
 
 __all__ = ["GARCH", "FittedGARCH", "gjr_garch"]
@@ -51,14 +53,6 @@ logger = logging.getLogger(__name__)
 _Dist = Literal["normal", "studentst"]
 _MIN_TRAIN = 20
 _MIN_NU = 2.02  # Student-t variance nu/(nu-2) blows up as nu -> 2
-_N_QUANTILES = 199
-_TAUS: NDArray[np.float64] = np.linspace(0.005, 0.995, _N_QUANTILES)
-
-
-def _student_t_quantile_grid(sigma2: float, nu: float) -> Distribution:
-    scale = math.sqrt(sigma2 * (nu - 2.0) / nu)
-    values = scale * stats.t.ppf(_TAUS, df=nu)
-    return Distribution.from_quantiles(_TAUS, values)
 
 
 @dataclass(frozen=True)
@@ -95,7 +89,7 @@ class FittedGARCH:
         if self.dist == "normal":
             return Normal(mu=0.0, sigma=math.sqrt(sigma2))
         nu = float(self.result.params["nu"])
-        return _student_t_quantile_grid(sigma2=sigma2, nu=nu)
+        return StudentT.from_variance(0.0, sigma2, nu)
 
 
 @dataclass(frozen=True)

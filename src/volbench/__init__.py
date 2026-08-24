@@ -27,7 +27,7 @@ from volbench.data import (
     realized_variance_from_bars,
     squared_return,
 )
-from volbench.dist import Distribution, Empirical, Normal, QuantileGrid
+from volbench.dist import Distribution, Empirical, Normal, QuantileGrid, StudentT
 from volbench.evaluate import (
     DEFAULT_LEVELS,
     ModelFactory,
@@ -89,6 +89,7 @@ __all__ = [
     "ResultsStore",
     "RollingOriginSplitter",
     "SerialExecutor",
+    "StudentT",
     "SupportsUpdate",
     "TimeSeriesFrame",
     "__version__",

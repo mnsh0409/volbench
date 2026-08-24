@@ -39,7 +39,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-from volbench.dist import Distribution, Empirical, Normal, QuantileGrid
+from volbench.dist import Distribution, Empirical, QuantileGrid
 from volbench.execute import Executor, SerialExecutor
 from volbench.metrics import qlike
 from volbench.models.base import FittedModel, ForecastModel
@@ -150,10 +150,13 @@ def forecast_moments(dist: Distribution) -> tuple[float, float]:
 
     The variance is the model's variance forecast (the fixed Phase 1
     convention), so it is what QLIKE scores against the proxy. Computed
-    through :class:`~volbench.dist.Distribution`'s public interface only —
-    ``dist.py`` is frozen for this phase.
+    through :class:`~volbench.dist.Distribution`'s public interface only.
 
-    - :class:`~volbench.dist.Normal`: closed form.
+    - Parametric families — :class:`~volbench.dist.Normal`,
+      :class:`~volbench.dist.StudentT`, anything implementing ``mean()`` and
+      ``variance()``: their own closed forms, asked for first. This is what
+      closed M1 report §4.2: a Student-t forecast used to arrive as a quantile
+      grid, and the grid's moments truncated its tails.
     - :class:`~volbench.dist.Empirical`: the plug-in moments of the sample.
       ``ddof=0`` deliberately — the ensemble *is* the predictive law here, the
       same reading under which ``Empirical.crps`` is exact rather than an
@@ -161,9 +164,13 @@ def forecast_moments(dist: Distribution) -> tuple[float, float]:
     - :class:`~volbench.dist.QuantileGrid`: exact for the interpolated law.
     - anything else: quadrature over a dense quantile grid, which truncates
       mass beyond the outermost tau and so understates very heavy tails.
+      Genuinely non-parametric objects are the only ones that should land
+      here.
     """
-    if isinstance(dist, Normal):
-        return dist.mu, dist.sigma * dist.sigma
+    try:
+        return dist.mean(), dist.variance()
+    except NotImplementedError:
+        pass
     if isinstance(dist, Empirical):
         return float(np.mean(dist.samples)), float(np.var(dist.samples))
     if isinstance(dist, QuantileGrid):

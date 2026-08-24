@@ -51,9 +51,18 @@
 ### Forecasting — `volbench.dist`, `volbench.models`
 
 - **`Distribution`** (`dist.py`) — the only forecast currency. Constructors
-  `from_normal`, `from_samples`, `from_quantiles`; concrete `Normal`,
-  `Empirical`, `QuantileGrid`. Methods: `quantile`, `cdf`, `crps`, `log_score`,
-  `pinball`, `sample`.
+  `from_normal`, `from_student_t`, `from_samples`, `from_quantiles`; concrete
+  `Normal`, `StudentT`, `Empirical`, `QuantileGrid`. Methods: `quantile`,
+  `cdf`, `crps`, `log_score`, `pinball`, `sample`, and — parametric families
+  only — `mean`/`variance` in closed form.
+
+  **Added on `m2/evaluator-hardening`:** `StudentT(loc, scale, df)`, the
+  location-scale t with closed-form moments and CRPS (Jordan, Krüger & Lerch
+  2019), cdf/quantile via `scipy.stats.t`. Requires `df > 1`; `variance()`
+  raises for `df <= 2`. `StudentT.from_variance(loc, v, df)` builds it from a
+  target variance so `variance()` round-trips exactly. `mean()`/`variance()`
+  joined the base interface (default `NotImplementedError`, like
+  `log_score`) so the evaluator can ask the object before estimating.
 
   **Diverged:** the plan named the constructor `from_params` and the method
   `logscore`. As built they are `from_normal` and `log_score`. `log_score`
@@ -98,8 +107,11 @@
 
 - **Baselines** (`models/`): `NaiveVol`, `EWMA`, `GARCH` (with `gjr_garch`),
   `HAR`. Every one returns `Normal(mu=0, sigma=...)` except Student-t GARCH,
-  which returns a 199-point `QuantileGrid` (chosen over `from_samples` because
-  it needs no RNG and so scores bit-identically across runs).
+  which returns a parametric `StudentT` built with `from_variance` from arch's
+  conditional variance (no RNG, so still bit-identical across runs). Until
+  `m2/evaluator-hardening` it returned a 199-point `QuantileGrid`, which is
+  what produced the QLIKE floor in M1 report §4.2 — see the resolved open
+  question below.
 
   **Diverged:** `HAR.fit` takes a realized-**variance** series, not returns.
   This is documented in its module and handled by `run_backtest(fit_series=...)`,
@@ -163,9 +175,11 @@
   every baseline currently holds a stale forecast between refits, recorded per
   row in `conditioned_through`. See `docs/M1_REPORT.md` risk 1.
 
-  **Added beyond the plan:** `forecast_moments(dist) -> (mean, variance)`,
-  closed-form for `Normal`, plug-in for `Empirical`, exact-for-the-interpolant
-  for `QuantileGrid`, quadrature otherwise.
+  **Added beyond the plan:** `forecast_moments(dist) -> (mean, variance)`.
+  Asks the object for `mean()`/`variance()` first (closed form: `Normal`,
+  `StudentT`); only genuinely non-parametric objects fall through — plug-in
+  for `Empirical`, exact-for-the-interpolant for `QuantileGrid`, quadrature
+  otherwise.
 
 - **`ResultsStore`** (`results.py`) — append-only parquet, one fragment per
   `config_hash` plus a JSON config sidecar, written through a temp file and
@@ -203,7 +217,7 @@ licence in `docs/data_licenses.md` permits vendoring a real one — see
 ## Public API surface
 
 `volbench` (root) exports the shared vocabulary and the entry points:
-`Distribution`/`Normal`/`Empirical`/`QuantileGrid`, `TimeSeriesFrame`, the
+`Distribution`/`Normal`/`StudentT`/`Empirical`/`QuantileGrid`, `TimeSeriesFrame`, the
 proxies and `log_returns`, `Origin`/`RollingOriginSplitter`, the four model
 classes and their fitted types plus `ForecastModel`/`FittedModel`,
 `run_backtest`/`forecast_moments`/`DEFAULT_LEVELS`/`SupportsUpdate`/
@@ -243,11 +257,15 @@ the guard, and keeps its own index assertion as a redundant belt.
 - [x] Closed-form vs. sample-based CRPS — settled: closed form for `Normal`,
       exact ensemble form for `Empirical`, trapezoidal pinball integral for
       `QuantileGrid`.
-- [ ] `forecast_moments` on a `QuantileGrid` treats the grid as the whole law
+- [x] `forecast_moments` on a `QuantileGrid` treats the grid as the whole law
       (flat tails), so it understates the variance of a heavy-tailed forecast —
-      ~8% at nu=5, ~24% at nu=3. QLIKE for Student-t GARCH is biased upward as
-      a result. Fix in `dist.py` (a parametric Student-t) or in
-      `forecast_moments` (tail extrapolation)?
+      ~8% at nu=5, ~24% at nu=3. QLIKE for Student-t GARCH was biased upward as
+      a result. **Resolved on `m2/evaluator-hardening`, in `dist.py`:** a
+      parametric `StudentT`; GARCH emits it; `forecast_moments` uses its
+      closed-form moments. `tests/test_qlike_student_t.py` reproduces the M1
+      report's floors on the old path and pins the new path below 1e-6. The
+      grid's understatement is unchanged and still documented — it is now only
+      reachable by objects that really are quantile grids.
 - [ ] Refit schedule API: per-model overrides, and `SupportsUpdate` on the
       econometric models so `refit_every > 1` means "re-estimate every 21 days,
       re-filter daily" rather than "freeze the forecast for 21 days".

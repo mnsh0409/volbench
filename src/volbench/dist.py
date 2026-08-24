@@ -18,8 +18,9 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy import special, stats  # type: ignore[import-untyped]
 
-__all__ = ["Distribution", "Empirical", "Normal", "QuantileGrid"]
+__all__ = ["Distribution", "Empirical", "Normal", "QuantileGrid", "StudentT"]
 
 _SQRT2 = math.sqrt(2.0)
 _INV_SQRT_PI = 1.0 / math.sqrt(math.pi)
@@ -42,6 +43,7 @@ class Distribution:
     Concrete constructors:
 
     - :meth:`from_normal`    — parametric N(mu, sigma^2)
+    - :meth:`from_student_t` — parametric location-scale Student-t
     - :meth:`from_samples`   — empirical ensemble
     - :meth:`from_quantiles` — quantile grid (tau -> value)
 
@@ -63,6 +65,10 @@ class Distribution:
     @staticmethod
     def from_normal(mu: float, sigma: float) -> Normal:
         return Normal(mu=float(mu), sigma=float(sigma))
+
+    @staticmethod
+    def from_student_t(loc: float, scale: float, df: float) -> StudentT:
+        return StudentT(loc=float(loc), scale=float(scale), df=float(df))
 
     @staticmethod
     def from_samples(samples: Sequence[float] | NDArray[np.float64]) -> Empirical:
@@ -99,6 +105,24 @@ class Distribution:
 
     def cdf(self, x: float) -> float:
         raise NotImplementedError
+
+    def mean(self) -> float:
+        """Mean of the predictive law, in closed form.
+
+        Implemented by parametric families only. Non-parametric objects
+        (``Empirical``, ``QuantileGrid``) deliberately do not estimate one
+        here: the evaluator owns that fallback and documents its bias.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no closed-form mean")
+
+    def variance(self) -> float:
+        """Variance of the predictive law, in closed form.
+
+        For a distribution over the next-period return this *is* the variance
+        forecast (CLAUDE.md rule 2), which is why it lives on the object rather
+        than being re-derived downstream from a quantile grid.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no closed-form variance")
 
     def crps(self, y: float) -> float:
         raise NotImplementedError
@@ -144,6 +168,12 @@ class Normal(Distribution):
     def cdf(self, x: float) -> float:
         return _Phi((x - self.mu) / self.sigma)
 
+    def mean(self) -> float:
+        return self.mu
+
+    def variance(self) -> float:
+        return self.sigma * self.sigma
+
     def crps(self, y: float) -> float:
         """Closed form (Gneiting & Raftery, 2007, eq. 21)."""
         z = (y - self.mu) / self.sigma
@@ -156,6 +186,124 @@ class Normal(Distribution):
     def sample(self, n: int, seed: int) -> NDArray[np.float64]:
         rng = np.random.default_rng(seed)
         return rng.normal(self.mu, self.sigma, size=n)
+
+
+@dataclass(frozen=True)
+class StudentT(Distribution):
+    """Location-scale Student-t predictive distribution ``loc + scale * T(df)``.
+
+    ``scale`` is the t's scale parameter, *not* its standard deviation: the
+    standard deviation is ``scale * sqrt(df / (df - 2))``. Build from a target
+    variance — a GARCH conditional variance, say — with :meth:`from_variance`,
+    which does that conversion and round-trips exactly through
+    :meth:`variance`.
+
+    ``df > 1`` is required. Below that the law has no mean and an infinite
+    CRPS, so nothing here could score it. For ``1 < df <= 2`` the mean exists
+    but the second moment diverges; :meth:`variance` raises rather than
+    returning ``inf``, because in volbench a return distribution's variance IS
+    the variance forecast (CLAUDE.md rule 2), and an infinite one is not a
+    forecast.
+
+    Why this exists: until it did, Student-t GARCH forecasts were a 199-point
+    quantile grid over tau in [0.005, 0.995], and the evaluator's moments of
+    that grid truncated the tails — a *perfectly specified* forecast could not
+    reach QLIKE 0, with a floor of 0.0407 at nu=3 (docs/M1_REPORT.md §4.2).
+    Closed-form moments and CRPS remove the bias at its source, with no RNG,
+    so scoring stays bit-identical across runs (CLAUDE.md rule 3).
+
+    Plain float fields, so the dataclass default value-``__eq__``/``__hash__``
+    are correct (same reasoning as ``Normal``).
+    """
+
+    loc: float
+    scale: float
+    df: float
+
+    def __post_init__(self) -> None:
+        if not (math.isfinite(self.loc) and math.isfinite(self.scale) and math.isfinite(self.df)):
+            raise ValueError("require finite loc, scale and df")
+        if self.scale <= 0.0:
+            raise ValueError("require scale > 0")
+        if self.df <= 1.0:
+            raise ValueError(
+                f"require df > 1 (got df={self.df}): a Student-t with df <= 1 has no mean "
+                "and an infinite CRPS, so it cannot be scored"
+            )
+
+    @classmethod
+    def from_variance(cls, loc: float, variance: float, df: float) -> StudentT:
+        """Build from a target *variance* instead of a scale.
+
+        ``scale = sqrt(variance * (df - 2) / df)``, so that
+        ``StudentT.from_variance(loc, v, df).variance() == v``. Needs
+        ``df > 2`` — a finite variance does not exist otherwise.
+        """
+        if not (math.isfinite(variance) and variance > 0.0):
+            raise ValueError("require finite variance > 0")
+        if not (math.isfinite(df) and df > 2.0):
+            raise ValueError(
+                f"a Student-t with a finite variance needs df > 2 (got df={df}); "
+                "for df <= 2 the variance is undefined and no scale reproduces it"
+            )
+        return cls(loc=float(loc), scale=math.sqrt(variance * (df - 2.0) / df), df=float(df))
+
+    def _z(self, x: float) -> float:
+        return (x - self.loc) / self.scale
+
+    def quantile(self, tau: float) -> float:
+        if not 0.0 < tau < 1.0:
+            raise ValueError("tau must lie strictly inside (0, 1)")
+        return self.loc + self.scale * float(stats.t.ppf(tau, df=self.df))
+
+    def cdf(self, x: float) -> float:
+        return float(stats.t.cdf(self._z(x), df=self.df))
+
+    def mean(self) -> float:
+        return self.loc  # df > 1 is guaranteed by __post_init__
+
+    def variance(self) -> float:
+        if self.df <= 2.0:
+            raise ValueError(
+                f"StudentT variance is undefined for df <= 2 (got df={self.df}): the second "
+                "moment diverges, so this object cannot supply a variance forecast"
+            )
+        return self.scale * self.scale * self.df / (self.df - 2.0)
+
+    def crps(self, y: float) -> float:
+        """Closed form for the location-scale t, ``df > 1``.
+
+        Jordan, Krüger & Lerch (2019, *J. Stat. Softw.* 90(12), Appendix A):
+        with ``z = (y - loc) / scale``, ``F``/``f`` the standard-t cdf/pdf and
+        ``B`` the beta function,
+
+            CRPS = scale * [ z (2F(z) - 1) + 2 f(z) (df + z^2)/(df - 1)
+                             - 2 sqrt(df)/(df - 1) * B(1/2, df - 1/2) / B(1/2, df/2)^2 ]
+
+        The beta ratio is evaluated through ``betaln`` so large ``df`` cannot
+        overflow; as ``df -> inf`` it tends to ``1/sqrt(pi)`` and the whole
+        expression to the Gaussian closed form. ``tests/test_dist.py`` checks
+        this against numerical integration of the quantile representation.
+        """
+        nu = self.df
+        z = self._z(y)
+        cdf = float(stats.t.cdf(z, df=nu))
+        pdf = float(stats.t.pdf(z, df=nu))
+        beta_ratio = math.exp(
+            float(special.betaln(0.5, nu - 0.5)) - 2.0 * float(special.betaln(0.5, nu / 2.0))
+        )
+        constant = 2.0 * math.sqrt(nu) / (nu - 1.0) * beta_ratio
+        return self.scale * (
+            z * (2.0 * cdf - 1.0) + 2.0 * pdf * (nu + z * z) / (nu - 1.0) - constant
+        )
+
+    def log_score(self, y: float) -> float:
+        # Density of the location-scale law: f_df(z) / scale.
+        return -(float(stats.t.logpdf(self._z(y), df=self.df)) - math.log(self.scale))
+
+    def sample(self, n: int, seed: int) -> NDArray[np.float64]:
+        rng = np.random.default_rng(seed)
+        return self.loc + self.scale * rng.standard_t(self.df, size=n)
 
 
 @dataclass(frozen=True, eq=False)

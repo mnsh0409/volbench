@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from volbench.dist import Normal, QuantileGrid
+from volbench.dist import Normal, StudentT
 from volbench.models import GARCH, gjr_garch
 from volbench.models.ewma import FittedEWMA
 
@@ -48,12 +48,31 @@ class TestGARCHDistributionTypes:
         fitted = GARCH(dist="normal").fit(rng.normal(0.0, 0.01, 500))
         assert isinstance(fitted.predict(1), Normal)
 
-    def test_studentt_innovations_return_quantile_grid(self) -> None:
+    def test_studentt_innovations_return_a_parametric_student_t(self) -> None:
+        """Was a 199-point QuantileGrid until m2/evaluator-hardening; the
+        grid's truncated tails biased QLIKE (docs/M1_REPORT.md §4.2)."""
         rng = np.random.default_rng(4)
         r = rng.standard_t(df=6, size=800) * 0.01
         fitted = GARCH(dist="studentst").fit(r)
         assert not fitted.fallback
-        assert isinstance(fitted.predict(1), QuantileGrid)
+        assert fitted.result is not None
+        dist = fitted.predict(1)
+        assert isinstance(dist, StudentT)
+        assert dist.loc == 0.0
+        assert dist.df == float(fitted.result.params["nu"])
+        # The object's variance is exactly arch's conditional variance, in
+        # the caller's units (rescale undone), not the t's scale parameter.
+        forecast = fitted.result.forecast(horizon=1, reindex=False)
+        sigma2 = float(forecast.variance.values[-1, 0]) / fitted.scale**2
+        assert dist.variance() == pytest.approx(sigma2, rel=1e-12)
+
+    def test_studentt_forecast_is_deterministic_without_an_rng(self) -> None:
+        rng = np.random.default_rng(4)
+        r = rng.standard_t(df=6, size=800) * 0.01
+        first = GARCH(dist="studentst").fit(r).predict(1)
+        second = GARCH(dist="studentst").fit(r).predict(1)
+        assert first == second  # value equality on (loc, scale, df)
+        assert first.crps(0.012) == second.crps(0.012)
 
     def test_gjr_garch_fits_and_predicts(self) -> None:
         rng = np.random.default_rng(5)
