@@ -17,20 +17,55 @@ anyone running only pytest.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from volbench import evaluate as evaluate_module
 from volbench.dist import Distribution
-from volbench.models import EWMA, GARCH, HAR, NaiveVol
+from volbench.models import EWMA, GARCH, HAR, Chronos, Moirai, NaiveVol, TimeGPT, TimesFM
 from volbench.models.base import FittedModel, ForecastModel
+from volbench.models.tsfm_common import RVQuantileForecast, TSFMBackend, ZeroShotRVModel
+
+
+class _FakeTSFMBackend:
+    """Weight-free stand-in so the zero-shot adapters conform here without the
+    `tsfm` extra. Typed strictly: this file is under `mypy --strict`, and the
+    assignment to `_BACKEND` below is the static check that the fake — and so
+    the surface the adapters actually call — matches `TSFMBackend`."""
+
+    taus: tuple[float, ...] = (0.1, 0.25, 0.5, 0.75, 0.9)
+    max_context: int = 2048
+
+    def identity(self) -> dict[str, Any]:
+        return {"backend": "fake", "checkpoint": "fake/echo", "revision": "0" * 40}
+
+    def forecast(self, context: NDArray[np.float64], h: int) -> RVQuantileForecast:
+        level = float(np.mean(context[-22:]))
+        grid = level * np.array([0.6, 0.8, 1.0, 1.25, 1.7])
+        return RVQuantileForecast(taus=self.taus, values=np.tile(grid, (h, 1)))
+
+
+_BACKEND: TSFMBackend = _FakeTSFMBackend()
 
 # Static conformance: annotating with the Protocol is the assertion. If any
 # class drops `name`/`spec()`/`fit()`, or changes a signature, mypy fails here.
-UNFITTED: list[ForecastModel] = [NaiveVol(), EWMA(), GARCH(), HAR()]
+UNFITTED: list[ForecastModel] = [
+    NaiveVol(),
+    EWMA(),
+    GARCH(),
+    HAR(),
+    Chronos(backend=_BACKEND),
+    TimesFM(backend=_BACKEND),
+    Moirai(backend=_BACKEND),
+    TimeGPT(backend=_BACKEND),
+]
 
-#: HAR is the exception: it fits on a realized-variance series, not returns
-#: (see models/har.py), which is why `_train_for` has to branch at all.
+#: HAR and the zero-shot foundation-model adapters are the exception: they fit
+#: on a realized-variance series, not returns (see models/har.py and
+#: models/tsfm_common.py), which is why `_train_for` has to branch at all.
 
 
 def _returns(n: int = 300, seed: int = 7) -> np.ndarray:
@@ -44,7 +79,7 @@ def _realized_variance(n: int = 300, seed: int = 7) -> np.ndarray:
 
 
 def _train_for(model: ForecastModel) -> np.ndarray:
-    return _realized_variance() if isinstance(model, HAR) else _returns()
+    return _realized_variance() if isinstance(model, HAR | ZeroShotRVModel) else _returns()
 
 
 class TestOneDefinition:

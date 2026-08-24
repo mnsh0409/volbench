@@ -140,6 +140,45 @@
   raise on a degenerate input (non-positive RV, short window). The two models
   disagree about whether a bad origin should be survivable.
 
+- **Zero-shot foundation models** (`models/tsfm_*.py`, added on
+  `feat/p2-models-tsfm`): `Chronos` (Chronos-Bolt by default, Chronos-2 by
+  checkpoint), `TimesFM` (2.5, 200M), `Moirai` (2.0-R-small) and `TimeGPT`
+  (Nixtla's hosted API, opt-in). All four share one contract in
+  `models/tsfm_common.py`, and the contract is the design choice to review:
+
+  - Like HAR, `fit` takes a **realized-variance** series — the trailing
+    `context_length` observations become the model's context; nothing is
+    estimated (D-005: zero-shot only, no fine-tuning path exists).
+  - `predict(h)` takes the model's own predictive distribution of RV at
+    `t+h` — a quantile grid at the levels the checkpoint was trained on —
+    and uses its **mean** (the mean of the interpolated grid, flat tails —
+    the same estimator `forecast_moments` applies to a `QuantileGrid`, pinned
+    equal by test) as the variance forecast, emitted as `Normal(0, sqrt(vhat))`
+    over the return, the shape HAR emits. The grid itself, the model's native
+    point head where one exists, and the crossing/clipping counts are kept in
+    the fitted `spec()` under `rv_forecasts`; none of it is scored.
+  - `update` is context extension, exact by construction; `refit_every` is
+    irrelevant to these models (every origin is one forward pass either way).
+  - `input_scale` (default `1e4`, variance in percent-squared) is a fixed unit
+    convention in `spec()`, forced by Moirai-2's scaler epsilon (`sqrt(var +
+    1e-5)`), which flattens a ~1e-4-level series into a constant.
+  - `spec()` carries checkpoint id, the resolved commit hash of the weights,
+    dtype, and package versions, so the config hash moves with the weights.
+    Chronos-Bolt/2, TimesFM 2.5 and Moirai-2 emit quantiles directly — no
+    sampling — and the `tsfm`-marked tests pin bit-identity on the GPU.
+    `device` is not in `spec()`.
+  - TimeGPT is triple-gated (constructor `enabled=True`, `NIXTLA_API_KEY`,
+    `@pytest.mark.timegpt`) and cannot pin remote weights; it stays out of
+    the headline as the research design says.
+
+  **Diverged:** the plan's model list names these as adapters of a generic
+  kind; as built they are RV-fed, like HAR, not return-fed — the same
+  type-uniform / meaning-divergent interface noted for HAR above, now shared
+  by five models. Optional deps live under the `tsfm` extra and are never
+  installed in CI: `tests/conftest.py` skips `tsfm`/`timegpt`-marked tests
+  by default and unconditionally under `CI`, while each adapter keeps a
+  mocked-backend test in the default suite.
+
 ### Splitting — `volbench.splitter`
 
 - **`RollingOriginSplitter`** — the ONLY sanctioned producer of train/test
@@ -185,6 +224,10 @@ Settled after M1 report §4.3 (open at M1, implemented on
   every model: re-conditioning is a no-op precisely when nothing new has been
   observed. That is what makes (b) above hold (`tests/test_model_interface.py`,
   `tests/test_models_update.py`, `tests/test_recondition.py`).
+- **Zero-shot models.** For the TSFM adapters `fit` and `update` are the same
+  operation (record the trailing context), so `refit_every` changes no number
+  — pinned in `tests/test_models_tsfm_common.py` by running the same cell at
+  `refit_every=1` and `21` and comparing scores byte for byte.
 
 ### Evaluation — `volbench.evaluate`, `volbench.results`, `volbench.execute`
 
@@ -277,8 +320,11 @@ their M1 hashes and are never overwritten.
 
 `volbench` (root) exports the shared vocabulary and the entry points:
 `Distribution`/`Normal`/`StudentT`/`Empirical`/`QuantileGrid`, `TimeSeriesFrame`, the
-proxies and `log_returns`, `Origin`/`RollingOriginSplitter`, the four model
-classes and their fitted types plus `ForecastModel`/`FittedModel`,
+proxies and `log_returns`, `Origin`/`RollingOriginSplitter`, the four baseline
+model classes and their fitted types, the four zero-shot adapters
+(`Chronos`/`TimesFM`/`Moirai`/`TimeGPT`, fitted type `FittedTSFM`; their
+shared base `ZeroShotRVModel`, `TSFMBackend` and `TimesFMForecastOptions`
+stay in `volbench.models`) plus `ForecastModel`/`FittedModel`,
 `run_backtest`/`forecast_moments`/`DEFAULT_LEVELS`/`SupportsUpdate`/
 `ModelFactory`, `ResultsStore` and the config-hash helpers,
 `Executor`/`SerialExecutor`, and `mse`/`qlike`/`pinball`.
@@ -341,7 +387,13 @@ the guard, and keeps its own index assertion as a redundant belt.
       sensitivity to the target's noise, and whether the return-fed models
       should also score QLIKE against the close-to-close proxy rather than
       Parkinson.
-- [ ] TSFM context construction; alignment across calendars.
+- [x] TSFM context construction — **settled on `feat/p2-models-tsfm`**: the
+      context is the trailing window of the splitter's `train` indices (ends
+      at the origin inclusive), capped by `context_length` and the checkpoint's
+      maximum; one series per forward pass, so no cross-series padding or
+      calendar alignment exists to leak through. Still open: batching several
+      assets per forward pass for the Phase 3 grid (H4), which would
+      reintroduce padding/alignment and must be leakage-checked when built.
 - [ ] R interop (rugarch) — subprocess adapter or drop?
 - [ ] A `DataAdapter` protocol, and machine-readable licence metadata that
       packaging can actually enforce.
