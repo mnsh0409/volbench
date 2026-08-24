@@ -556,9 +556,17 @@ def _require_one_calendar(*inputs: tuple[str, object]) -> None:
     identical indexes — values and order, not just length — and mixing an
     indexed input with a bare array is refused rather than guessed at.
 
+    Indexes must also be in ascending time order. The splitter hands out
+    *positions*, so a series whose index runs backwards would put "later"
+    positions on earlier days and the whole backtest would run against time —
+    look-ahead that no equality check can see. ``TimeSeriesFrame`` already
+    guarantees ascending order at ingestion; this closes the gap for
+    hand-built Series (flagged by the M2 leakage audit).
+
     Bare arrays across the board are still accepted: they carry no calendar
     to check, so passing them is the caller's explicit statement that the
-    alignment is theirs to guarantee. ``_as_series`` still checks lengths.
+    alignment — and the time ordering — is theirs to guarantee. ``_as_series``
+    still checks lengths.
     """
     calendars = [(name, _calendar_of(values)) for name, values in inputs if values is not None]
     indexed = [(name, index) for name, index in calendars if index is not None]
@@ -573,6 +581,16 @@ def _require_one_calendar(*inputs: tuple[str, object]) -> None:
             "yourself"
         )
     reference_name, reference = indexed[0]
+    if not reference.is_monotonic_increasing:
+        values = reference.to_numpy()
+        position = int(np.flatnonzero(values[1:] < values[:-1])[0]) + 1
+        raise ValueError(
+            f"{reference_name} index is not in ascending time order: position {position} "
+            f"({reference[position]!s}) precedes position {position - 1} "
+            f"({reference[position - 1]!s}). run_backtest works positionally, so an index "
+            "running backwards would let later positions hold earlier days and the backtest "
+            f"would run against time — sort {reference_name} by time first"
+        )
     for name, index in indexed[1:]:
         if reference.equals(index):
             continue

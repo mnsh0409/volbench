@@ -804,6 +804,36 @@ def test_a_calendar_cannot_be_compared_with_positions() -> None:
         backtest(OracleNormal(SIGMA), _dated(returns), pd.Series(proxy), make_splitter())
 
 
+def test_a_descending_index_is_rejected() -> None:
+    """The M2 leakage-audit gap: identical-but-backwards calendars passed the
+    equality check, and the splitter would then have run against time."""
+    returns, proxy = simulated_panel(n=400)
+    descending_index = pd.date_range("2020-01-01", periods=400, freq="B", tz="UTC")[::-1]
+    backwards_returns = pd.Series(returns, index=descending_index)
+    backwards_proxy = pd.Series(proxy, index=descending_index)
+
+    with pytest.raises(ValueError, match="not in ascending time order") as info:
+        backtest(OracleNormal(SIGMA), backwards_returns, backwards_proxy, make_splitter())
+    message = str(info.value)
+    assert "position 1" in message  # the first out-of-order step is named
+    assert "against time" in message  # and why it matters
+
+
+def test_a_shuffled_index_is_rejected() -> None:
+    returns, proxy = simulated_panel(n=400)
+    rng = np.random.default_rng(5)
+    shuffled = pd.DatetimeIndex(
+        rng.permutation(pd.date_range("2020-01-01", periods=400, freq="B", tz="UTC"))
+    )
+    with pytest.raises(ValueError, match="not in ascending time order"):
+        backtest(
+            OracleNormal(SIGMA),
+            pd.Series(returns, index=shuffled),
+            pd.Series(proxy, index=shuffled),
+            make_splitter(),
+        )
+
+
 def test_mixing_indexed_and_bare_inputs_is_refused() -> None:
     returns, proxy = simulated_panel(n=400)
     with pytest.raises(ValueError, match="proxy is a bare array"):

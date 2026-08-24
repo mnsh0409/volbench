@@ -306,8 +306,11 @@ the `package_version()` that enters every config hash.
 `run_backtest` aligns `series`, `proxy` and `fit_series` *positionally*, so it
 now requires them to be on one calendar. Pandas inputs must carry identical
 indexes — values and order, checked with `Index.equals`, the first mismatching
-position named in the `ValueError`; mixing an indexed input with a bare array
-is refused. Bare arrays for *every* input remain accepted as an explicit
+position named in the `ValueError` — and the index must be in ascending time
+order (`is_monotonic_increasing`; added on `m2/cleanup` to close the M2
+leakage-audit gap, since a backwards calendar would make the positional
+splitter run against time); mixing an indexed input with a bare array is
+refused. Bare arrays for *every* input remain accepted as an explicit
 positional opt-in (only lengths are checked), because they carry no calendar
 to compare. `benchmarks/toy.py` passes indexed Series so its path exercises
 the guard, and keeps its own index assertion as a redundant belt.
