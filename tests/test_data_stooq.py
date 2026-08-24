@@ -37,10 +37,21 @@ _CHALLENGE_PAGE = (
 
 class TestSymbolMap:
     def test_expected_assets_present(self) -> None:
-        expected = {
-            "SPX", "NDX", "DJI", "DAX", "FTSE", "CAC", "NKX", "HSI", "TWSE", "KOSPI",
-        }
+        # The seven indices Stooq still serves as indices. SPX/DJI/FTSE are
+        # deliberately absent: Stooq retired them for unlicensed CFD proxies,
+        # and D-012 fills those slots with ETFs in `volbench.data.panel`.
+        expected = {"NDX", "DAX", "CAC", "NKX", "HSI", "TWSE", "KOSPI"}
         assert set(STOOQ_INDEX_SYMBOLS) == expected
+
+    def test_no_cfd_proxy_survives(self) -> None:
+        assert not {"^uslc", "^usbc", "^uklc"} & set(STOOQ_INDEX_SYMBOLS.values())
+        assert not {"SPX", "DJI", "FTSE"} & set(STOOQ_INDEX_SYMBOLS)
+
+    def test_map_is_a_subset_of_the_panel(self) -> None:
+        from volbench.data.panel import EQUITY_PANEL
+
+        for asset_id, symbol in STOOQ_INDEX_SYMBOLS.items():
+            assert EQUITY_PANEL[asset_id].ticker.lower() == symbol.lower()
 
     def test_symbols_are_caret_prefixed(self) -> None:
         assert all(sym.startswith("^") for sym in STOOQ_INDEX_SYMBOLS.values())
@@ -76,9 +87,9 @@ class TestIngestManualCsv:
         cache_dir = tmp_path / "stooq_cache"
         ingested_on = pd.Timestamp("2024-06-01").date()
         result = ingest_manual_csv(
-            FIXTURE, asset_id="SPX", cache_dir=cache_dir, ingested_on=ingested_on
+            FIXTURE, asset_id="NDX", cache_dir=cache_dir, ingested_on=ingested_on
         )
-        assert result.frame.asset_id == "SPX"
+        assert result.frame.asset_id == "NDX"
         assert result.frame.source == "stooq"
         assert len(result.frame) == 5
         assert result.sha256 == hashlib.sha256(FIXTURE.read_bytes()).hexdigest()
@@ -88,8 +99,8 @@ class TestIngestManualCsv:
         assert len(cached_files) == 1
         assert len(meta_files) == 1
         meta = json.loads(meta_files[0].read_text())
-        assert meta["asset_id"] == "SPX"
-        assert meta["symbol"] == STOOQ_INDEX_SYMBOLS["SPX"]
+        assert meta["asset_id"] == "NDX"
+        assert meta["symbol"] == STOOQ_INDEX_SYMBOLS["NDX"]
         assert meta["sha256"] == result.sha256
 
     def test_cache_roundtrip_via_download_index(self, tmp_path: Path) -> None:
@@ -98,11 +109,11 @@ class TestIngestManualCsv:
         # reads the same cache instead of trying (and failing) to hit the network.
         cache_dir = tmp_path / "stooq_cache"
         ingested_date = pd.Timestamp("2024-06-01").date()
-        ingest_manual_csv(FIXTURE, asset_id="SPX", cache_dir=cache_dir, ingested_on=ingested_date)
+        ingest_manual_csv(FIXTURE, asset_id="NDX", cache_dir=cache_dir, ingested_on=ingested_date)
 
-        frame = download_index("SPX", cache_dir=cache_dir, download_date=ingested_date)
+        frame = download_index("NDX", cache_dir=cache_dir, download_date=ingested_date)
         assert len(frame) == 5
-        assert frame.asset_id == "SPX"
+        assert frame.asset_id == "NDX"
 
     def test_unknown_asset_rejected(self, tmp_path: Path) -> None:
         with pytest.raises(KeyError):

@@ -37,10 +37,14 @@ instruments instead:
 - ``^ndx``, ``^dax``, ``^cac``, ``^nkx``, ``^hsi``, ``^twse``, ``^kospi``
   all confirmed correct and unchanged.
 
-This is a data-provenance change worth a human decision, not just a symbol
-fix: the SPX/DJI/FTSE100 slots in the D-004 panel now resolve to Stooq's
-own CFD proxies, not the licensed indices docs/research_design.md
-describes. Flagged in docs/data_licenses.md rather than resolved here.
+That was a data-provenance change worth a human decision, not just a symbol
+fix, and the decision was taken (D-012, Phase 2): the three slots are filled
+by tradable ETFs on the index — SPY, DIA, ISF — never by the CFD proxies.
+``STOOQ_INDEX_SYMBOLS`` below therefore carries only the seven indices Stooq
+still serves as indices; the study's actual asset list, ETFs included, is
+``volbench.data.panel.EQUITY_PANEL``, the single source of truth for what the
+panel contains. (The CFD entries were retired at the Phase-2 integration;
+docs/PANEL_REPORT.md §9 item 8.)
 
 Never commit downloaded data: caches live under a gitignored directory
 (default ``data/cache/stooq/``) and are never vendored with the package.
@@ -74,15 +78,14 @@ __all__ = [
 STOOQ_CSV_URL = "https://stooq.com/q/d/l/"
 
 #: canonical asset id -> Stooq ticker for the D-004 core equity-index panel.
-#: All confirmed live on 2026-08-23 (see module docstring). SPX/DJI/FTSE map
-#: to Stooq's unlicensed CFD proxies, not the literal licensed indices — a
-#: provenance change flagged in docs/data_licenses.md, not silently absorbed.
+#: All confirmed live on 2026-08-23 (see module docstring). Only the indices
+#: Stooq serves *as indices*: the SPX/DJI/FTSE slots are NOT here — Stooq
+#: retired those symbols in favour of unlicensed CFD proxies (^uslc, ^usbc,
+#: ^uklc), and D-012 fills the slots with ETFs (SPY/DIA/ISF) instead. The
+#: panel's asset list lives in ``volbench.data.panel.EQUITY_PANEL``.
 STOOQ_INDEX_SYMBOLS: dict[str, str] = {
-    "SPX": "^uslc",  # was ^spx: Stooq retired it, redirects to ^USLC "U.S. Large Cap CFD"
     "NDX": "^ndx",  # NASDAQ-100 — confirmed
-    "DJI": "^usbc",  # was ^dji: Stooq retired it, redirects to ^USBC "U.S. Blue Chip CFD"
     "DAX": "^dax",  # DAX — confirmed
-    "FTSE": "^uklc",  # ^ftse doesn't exist; Main Indices lists FTSE 100 as ^UKLC "UK Large Cap CFD"
     "CAC": "^cac",  # CAC 40 — confirmed
     "NKX": "^nkx",  # Nikkei 225 — confirmed
     "HSI": "^hsi",  # Hang Seng — confirmed
