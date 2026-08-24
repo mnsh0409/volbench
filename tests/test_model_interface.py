@@ -91,17 +91,35 @@ class TestFittedConformance:
         assert abs(mean) < 1.0
 
 
-class TestUpdateCapabilityIsAbsent:
-    """Pins the known M1 gap so closing it is a deliberate, reviewed change.
+class TestUpdateCapability:
+    """Every baseline re-conditions between refits without re-estimating.
 
-    `volbench.evaluate.SupportsUpdate` exists so a model can re-condition on
-    newer returns between scheduled refits without re-estimating parameters.
-    No Phase 1 model implements it, so with `refit_every > 1` every baseline
-    holds its forecast constant between refits (recorded per row in
-    `conditioned_through`). See docs/M1_REPORT.md, risk 1.
+    M1 report §4.3 recorded that no Phase 1 model implemented
+    `volbench.evaluate.SupportsUpdate`, so "refit every 21 days" froze each
+    forecast for 21 days. Closed on m2/evaluator-hardening: all four implement
+    it, and the backtest calls it at every non-refit origin under
+    `recondition="daily"`.
     """
 
     @pytest.mark.parametrize("model", UNFITTED, ids=lambda m: m.name)
-    def test_no_phase1_model_supports_update(self, model: ForecastModel) -> None:
+    def test_every_model_supports_update(self, model: ForecastModel) -> None:
         fitted = model.fit(_train_for(model))
-        assert not isinstance(fitted, evaluate_module.SupportsUpdate)
+        assert isinstance(fitted, evaluate_module.SupportsUpdate)
+        again: FittedModel = fitted.update(_train_for(model))
+        assert isinstance(again, FittedModel)
+        assert isinstance(again, evaluate_module.SupportsUpdate)  # and so is its successor
+
+    @pytest.mark.parametrize("model", UNFITTED, ids=lambda m: m.name)
+    def test_update_on_the_fit_window_reproduces_the_fit_exactly(
+        self, model: ForecastModel
+    ) -> None:
+        """Re-conditioning on the data a model was just fitted on must change
+        nothing — this is the property the refit_every=1 byte-identity
+        equivalence rests on, and any drift here is an implementation bug."""
+        train = _train_for(model)
+        fitted = model.fit(train)
+        assert isinstance(fitted, evaluate_module.SupportsUpdate)
+        again = fitted.update(train)
+        assert evaluate_module.forecast_moments(again.predict(1)) == (
+            evaluate_module.forecast_moments(fitted.predict(1))
+        )

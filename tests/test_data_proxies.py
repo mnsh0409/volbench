@@ -17,6 +17,7 @@ import pytest
 from volbench.data import (
     garman_klass,
     log_returns,
+    overnight_plus_range_variance,
     parkinson,
     realized_variance_from_bars,
     squared_return,
@@ -27,6 +28,23 @@ _LN2 = math.log(2.0)
 
 def _idx(n: int) -> pd.DatetimeIndex:
     return pd.date_range("2024-01-02", periods=n, freq="D", tz="UTC")
+
+
+def _consistent_bars(
+    rng: np.random.Generator, n: int
+) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+    """Random OHLC bars satisfying low <= min(O, C) <= max(O, C) <= high."""
+    o = 100.0 * np.exp(rng.normal(0, 0.01, n))
+    c = o * np.exp(rng.normal(0, 0.01, n))
+    hi = np.maximum(o, c) + rng.random(n)
+    lo = np.minimum(o, c) - rng.random(n)
+    idx = _idx(n)
+    return (
+        pd.Series(o, index=idx),
+        pd.Series(hi, index=idx),
+        pd.Series(lo, index=idx),
+        pd.Series(c, index=idx),
+    )
 
 
 class TestLogReturns:
@@ -126,6 +144,151 @@ class TestGarmanKlass:
         with pytest.raises(ValueError, match="high must be >= low"):
             garman_klass(
                 pd.Series([100.0]), pd.Series([90.0]), pd.Series([110.0]), pd.Series([100.0])
+            )
+
+
+class TestOvernightPlusRangeVariance:
+    """The M2 close-to-close target: squared overnight jump + Rogers-Satchell.
+
+    ``(ln(O_t/C_{t-1}))^2 + ln(H/O)ln(H/C) + ln(L/O)ln(L/C)``. Formulas
+    corroborated 2026-08-24 across CRAN TTR, arXiv:1803.07152 and
+    portfoliooptimizer.io (see the function docstring); primary papers
+    (Rogers & Satchell 1991; Yang & Zhang 2000) are paywalled.
+    """
+
+    def test_hand_computed_value(self) -> None:
+        o = pd.Series([100.0, 103.0], index=_idx(2))
+        h = pd.Series([105.0, 108.0], index=_idx(2))
+        low = pd.Series([98.0, 101.0], index=_idx(2))
+        c = pd.Series([102.0, 104.0], index=_idx(2))
+        out = overnight_plus_range_variance(o, h, low, c)
+        assert np.isnan(out.iloc[0])  # no C_{-1}
+        overnight = math.log(103.0 / 102.0) ** 2  # O_1 vs C_0
+        rs = math.log(108.0 / 103.0) * math.log(108.0 / 104.0) + math.log(
+            101.0 / 103.0
+        ) * math.log(101.0 / 104.0)
+        assert out.iloc[1] == pytest.approx(overnight + rs, rel=1e-12)
+        assert out.name == "overnight_plus_range"
+
+    def test_first_observation_is_nan_and_index_is_preserved(self) -> None:
+        n = 6
+        o = pd.Series(100.0 + np.arange(n), index=_idx(n))
+        h = pd.Series(101.0 + np.arange(n), index=_idx(n))
+        low = pd.Series(99.0 + np.arange(n), index=_idx(n))
+        c = pd.Series(100.5 + np.arange(n), index=_idx(n))
+        out = overnight_plus_range_variance(o, h, low, c)
+        assert out.index.equals(o.index)
+        assert np.isnan(out.iloc[0])
+        assert out.iloc[1:].notna().all()
+
+    def test_it_is_causal_no_forward_reach(self) -> None:
+        """Row t must be computable from data at or before t. Truncating the
+        series after t therefore cannot change any row <= t — which it would if
+        the overnight term used ``C_{t+1}`` (a ``shift(-1)`` slip)."""
+        n = 12
+        rng = np.random.default_rng(0)
+        o, h, low, c = _consistent_bars(rng, n)
+        full = overnight_plus_range_variance(o, h, low, c)
+        for t in (3, 6, 9):
+            trunc = overnight_plus_range_variance(
+                o.iloc[: t + 1], h.iloc[: t + 1], low.iloc[: t + 1], c.iloc[: t + 1]
+            )
+            pd.testing.assert_series_equal(full.iloc[: t + 1], trunc)
+
+    def test_overnight_anchor_is_the_previous_close_only(self) -> None:
+        """Row t's overnight term is ``ln(O_t / C_{t-1})``: moving ``C_{t-1}``
+        moves it, moving a strictly-future close (kept within its own bar so
+        the estimator still accepts it) does not."""
+        n = 8
+        rng = np.random.default_rng(1)
+        o, h, low, c = _consistent_bars(rng, n)
+        base = overnight_plus_range_variance(o, h, low, c)
+        t = 4
+
+        future = c.copy()  # a valid within-bar move of a strictly-future close
+        future.iloc[t + 1] = float(low.iloc[t + 1])
+        after_future = overnight_plus_range_variance(o, h, low, future)
+        pd.testing.assert_series_equal(base.iloc[: t + 1], after_future.iloc[: t + 1])
+
+        prev = c.copy()  # move C_{t-1} within its bar; only the overnight anchor of row t
+        prev.iloc[t - 1] = float(low.iloc[t - 1])
+        after_prev = overnight_plus_range_variance(o, h, low, prev)
+        assert after_prev.iloc[t] != base.iloc[t]
+
+    def test_rogers_satchell_term_is_drift_independent(self) -> None:
+        """RS's whole reason for existing (Rogers & Satchell 1991): its
+        expectation is the diffusion variance whatever the drift. Build
+        continuous-open days (each opens at the prior close, so the overnight
+        term is exactly zero and this isolates RS), then re-run with a large
+        drift added to the *same* Brownian increments. RS barely moves;
+        Parkinson, which is drift-blind, inflates by orders more.
+
+        The comparison is deliberately relative — RS-with-drift against
+        RS-without — so the fixed discretization bias at finite steps cancels
+        and only the drift sensitivity is measured. Absolute accuracy against a
+        known variance is covered by tests/test_target_estimators.py, where the
+        generator supplies the truth.
+        """
+        rng = np.random.default_rng(7)
+        n_days, steps = 3000, 5000
+        true_var = 4e-4
+        vol = math.sqrt(true_var)
+        base_increments = [
+            vol / math.sqrt(steps) * rng.standard_normal(steps) for _ in range(n_days)
+        ]
+
+        def build(drift: float) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+            price = 100.0
+            o, h, low, c = (np.empty(n_days) for _ in range(4))
+            for d in range(n_days):
+                path = np.concatenate([[0.0], np.cumsum(base_increments[d] + drift / steps)])
+                o[d] = price
+                prices = price * np.exp(path)
+                h[d], low[d], c[d] = prices.max(), prices.min(), prices[-1]
+                price = c[d]  # next day opens here -> overnight term is exactly 0
+            idx = _idx(n_days)
+            o_s, h_s, l_s, c_s = (pd.Series(a, index=idx) for a in (o, h, low, c))
+            return o_s, h_s, l_s, c_s
+
+        o0, h0, l0, c0 = build(drift=0.0)
+        od, hd, ld, cd = build(drift=2.0 * vol)  # a huge daily drift: 2x the daily vol
+
+        rs_sensitivity = abs(
+            float(overnight_plus_range_variance(od, hd, ld, cd).iloc[1:].mean())
+            / float(overnight_plus_range_variance(o0, h0, l0, c0).iloc[1:].mean())
+            - 1.0
+        )
+        park_sensitivity = abs(
+            float(parkinson(hd, ld).iloc[1:].mean())
+            / float(parkinson(h0, l0).iloc[1:].mean())
+            - 1.0
+        )
+        assert rs_sensitivity < 0.05  # RS is nearly drift-invariant
+        assert park_sensitivity > 1.0  # Parkinson more than doubles under the same drift
+        assert park_sensitivity > 20.0 * rs_sensitivity  # and is orders more drift-sensitive
+
+    def test_inconsistent_bars_are_rejected(self) -> None:
+        good = dict(
+            open_=pd.Series([100.0, 100.0]),
+            high=pd.Series([101.0, 101.0]),
+            low=pd.Series([99.0, 99.0]),
+            close=pd.Series([100.5, 100.5]),
+        )
+        overnight_plus_range_variance(**good)  # baseline is fine
+        with pytest.raises(ValueError, match="high must be >= low"):
+            overnight_plus_range_variance(
+                open_=pd.Series([100.0]), high=pd.Series([98.0]),
+                low=pd.Series([99.0]), close=pd.Series([100.0]),
+            )
+        with pytest.raises(ValueError, match="high must be >= open"):
+            overnight_plus_range_variance(
+                open_=pd.Series([110.0]), high=pd.Series([105.0]),
+                low=pd.Series([99.0]), close=pd.Series([100.0]),
+            )
+        with pytest.raises(ValueError, match="low must be <= open"):
+            overnight_plus_range_variance(
+                open_=pd.Series([100.0]), high=pd.Series([105.0]),
+                low=pd.Series([101.0]), close=pd.Series([104.0]),
             )
 
 

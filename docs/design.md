@@ -41,19 +41,37 @@
 
 - **Proxies** (`data/proxies.py`) — pure functions, daily units, no hidden
   state: `squared_return`, `parkinson`, `garman_klass`,
-  `realized_variance_from_bars`, and `log_returns`.
+  `realized_variance_from_bars`, `log_returns`, and
+  `overnight_plus_range_variance`.
 
   **Diverged (added at M1):** `log_returns` was not in the plan. The data layer
   exposed only `r^2`, but the models and the evaluator both speak in *signed*
   returns, so every caller was re-deriving them by hand. It returns a leading
   NaN so the output stays index-aligned with its input.
 
+  **Added at M2 (report §4.4, D-016):** `overnight_plus_range_variance` =
+  `(ln(O_t/C_{t-1}))^2 + RS_t`, the per-day CLOSE-TO-CLOSE variance estimator
+  (Rogers & Satchell 1991 range term plus the squared overnight jump).
+  Deliberately not Yang-Zhang, which is windowed and would reach past day `t`.
+  It is HAR's scoring target, since a range proxy alone omits the overnight
+  variance HAR's forecast is scored against. First observation NaN (no
+  `C_{t-1}`).
+
 ### Forecasting — `volbench.dist`, `volbench.models`
 
 - **`Distribution`** (`dist.py`) — the only forecast currency. Constructors
-  `from_normal`, `from_samples`, `from_quantiles`; concrete `Normal`,
-  `Empirical`, `QuantileGrid`. Methods: `quantile`, `cdf`, `crps`, `log_score`,
-  `pinball`, `sample`.
+  `from_normal`, `from_student_t`, `from_samples`, `from_quantiles`; concrete
+  `Normal`, `StudentT`, `Empirical`, `QuantileGrid`. Methods: `quantile`,
+  `cdf`, `crps`, `log_score`, `pinball`, `sample`, and — parametric families
+  only — `mean`/`variance` in closed form.
+
+  **Added on `m2/evaluator-hardening`:** `StudentT(loc, scale, df)`, the
+  location-scale t with closed-form moments and CRPS (Jordan, Krüger & Lerch
+  2019), cdf/quantile via `scipy.stats.t`. Requires `df > 1`; `variance()`
+  raises for `df <= 2`. `StudentT.from_variance(loc, v, df)` builds it from a
+  target variance so `variance()` round-trips exactly. `mean()`/`variance()`
+  joined the base interface (default `NotImplementedError`, like
+  `log_score`) so the evaluator can ask the object before estimating.
 
   **Diverged:** the plan named the constructor `from_params` and the method
   `logscore`. As built they are `from_normal` and `log_score`. `log_score`
@@ -98,14 +116,24 @@
 
 - **Baselines** (`models/`): `NaiveVol`, `EWMA`, `GARCH` (with `gjr_garch`),
   `HAR`. Every one returns `Normal(mu=0, sigma=...)` except Student-t GARCH,
-  which returns a 199-point `QuantileGrid` (chosen over `from_samples` because
-  it needs no RNG and so scores bit-identically across runs).
+  which returns a parametric `StudentT` built with `from_variance` from arch's
+  conditional variance (no RNG, so still bit-identical across runs). Until
+  `m2/evaluator-hardening` it returned a 199-point `QuantileGrid`, which is
+  what produced the QLIKE floor in M1 report §4.2 — see the resolved open
+  question below.
 
   **Diverged:** `HAR.fit` takes a realized-**variance** series, not returns.
   This is documented in its module and handled by `run_backtest(fit_series=...)`,
   but it means "the model interface" is uniform in *type* and not in *meaning*
   — nothing in the type system distinguishes a returns array from a variance
   array. See `docs/M1_REPORT.md` risk 2.
+
+  **Open (found at M2, docs/M2_NOTES.md):** HAR's lognormal retransformation
+  `E[RV]=exp(ŷ+½·resid_var)` is sensitive to the target's log-space noise. On
+  the toy fixture, feeding HAR the (correct, noisier) overnight-plus-range
+  target inflates its forecast ~13% above the true variance, where the
+  intraday Parkinson target happened to leave it well-calibrated. A bias-
+  corrected or component overnight+intraday HAR is the Phase-2 fix.
 
   **Diverged:** `GARCH.fit` never raises on optimizer failure; it falls back to
   EWMA on the same window and records `fallback=True`. HAR, by contrast, *does*
@@ -124,6 +152,39 @@
   also `horizon`, and the refit schedule is the integer `refit_every` rather
   than a schedule object. Only rolling (fixed-length) windows exist; expanding
   windows are not implemented.
+
+### Refit protocol — what "refit every N days" means
+
+Settled after M1 report §4.3 (open at M1, implemented on
+`m2/evaluator-hardening`):
+
+- **Re-estimate every `refit_every` origins.** `fit` runs only at origins the
+  splitter marks `refit=True`; the number of `fit` calls equals the number of
+  refit origins, and `fit_origin` records on every row which one served it.
+- **Re-condition daily in between** (`recondition="daily"`, the default). At
+  every other origin the backtest calls `FittedModel.update(train)` with that
+  origin's own splitter window — observations dated ≤ the origin, the exact
+  array `fit` would have been handed — and the model re-filters its
+  conditional state at the parameters of the last scheduled fit. `update`
+  never re-estimates: GARCH/GJR re-filter through `arch`'s `ARCHModel.fix`
+  (no optimizer runs; the fit's `scale` is reapplied so the parameters keep
+  their units); EWMA re-runs its recursion (λ is a fixed hyperparameter); HAR
+  refreshes its 22 trailing RV lags under the fitted coefficients; naive
+  slides its window. `conditioned_through` records the origin on every row.
+- **Frozen** (`recondition="none"`): the forecast issued at the refit origin
+  is held until the next refit — exactly what every baseline did before
+  `update` existed — kept as an explicit ablation arm, not a default anyone
+  can fall into. `conditioned_through == fit_origin` on every row.
+- **Identity.** `recondition` enters the config hash (under `protocol`)
+  whenever it can change a number, i.e. whenever `refit_every > 1`. At
+  `refit_every == 1` every origin refits, `update` is unreachable, and the two
+  settings are the same experiment, so nothing is recorded and every hash
+  computed before the key existed — the toy benchmark's included — is
+  unchanged.
+- **Invariant.** `update` on the fit window reproduces the fit exactly, for
+  every model: re-conditioning is a no-op precisely when nothing new has been
+  observed. That is what makes (b) above hold (`tests/test_model_interface.py`,
+  `tests/test_models_update.py`, `tests/test_recondition.py`).
 
 ### Evaluation — `volbench.evaluate`, `volbench.results`, `volbench.execute`
 
@@ -159,13 +220,16 @@
 
   **Added beyond the plan:** `SupportsUpdate`, an optional Protocol letting a
   model re-condition on newer data between scheduled refits without
-  re-estimating. **No Phase 1 model implements it**, so at `refit_every > 1`
-  every baseline currently holds a stale forecast between refits, recorded per
-  row in `conditioned_through`. See `docs/M1_REPORT.md` risk 1.
+  re-estimating. At M1 no model implemented it, so `refit_every > 1` froze
+  every forecast between refits (M1 report §4.3, risk 1). Since
+  `m2/evaluator-hardening` all four baselines implement it and the backtest
+  takes `recondition="daily" | "none"` — see "Refit protocol" above.
 
-  **Added beyond the plan:** `forecast_moments(dist) -> (mean, variance)`,
-  closed-form for `Normal`, plug-in for `Empirical`, exact-for-the-interpolant
-  for `QuantileGrid`, quadrature otherwise.
+  **Added beyond the plan:** `forecast_moments(dist) -> (mean, variance)`.
+  Asks the object for `mean()`/`variance()` first (closed form: `Normal`,
+  `StudentT`); only genuinely non-parametric objects fall through — plug-in
+  for `Empirical`, exact-for-the-interpolant for `QuantileGrid`, quadrature
+  otherwise.
 
 - **`ResultsStore`** (`results.py`) — append-only parquet, one fragment per
   `config_hash` plus a JSON config sidecar, written through a temp file and
@@ -194,16 +258,23 @@
 ### Benchmarks — `volbench.benchmarks`
 
 **Added beyond the plan.** `benchmarks/toy.py` composes all three streams over
-a synthetic series: 4 baselines × 200 rolling origins, ~2.3s, byte-identical
-across runs. `benchmarks/make_toy_asset.py` generates its input. `make
-reproduce` rebuilds both from scratch. The series is synthetic because no
-licence in `docs/data_licenses.md` permits vendoring a real one — see
-`docs/M1_REPORT.md`.
+a synthetic series: at M2, **5** baselines (naive, EWMA, GARCH, GARCH-t, HAR) ×
+200 rolling origins, ~5s, byte-identical across runs. Each `ModelEntry` names
+its scoring `target`: HAR is fed and scored on `overnight_plus_range_variance`
+(D-016), the return-fed models on Parkinson. The GARCH-t config exercises the
+parametric `StudentT` path (D-014) under `make reproduce`.
+`benchmarks/make_toy_asset.py` generates the input as independent overnight and
+intraday components summing to a recorded `true_variance` (M2), so estimators
+can be validated against the truth. `make reproduce` rebuilds both from
+scratch. The series is synthetic because no licence in `docs/data_licenses.md`
+permits vendoring a real one — see `docs/M1_REPORT.md`. The M1 byte-identity
+baseline was superseded by the M2 fixture; old `ResultsStore` fragments keep
+their M1 hashes and are never overwritten.
 
 ## Public API surface
 
 `volbench` (root) exports the shared vocabulary and the entry points:
-`Distribution`/`Normal`/`Empirical`/`QuantileGrid`, `TimeSeriesFrame`, the
+`Distribution`/`Normal`/`StudentT`/`Empirical`/`QuantileGrid`, `TimeSeriesFrame`, the
 proxies and `log_returns`, `Origin`/`RollingOriginSplitter`, the four model
 classes and their fitted types plus `ForecastModel`/`FittedModel`,
 `run_backtest`/`forecast_moments`/`DEFAULT_LEVELS`/`SupportsUpdate`/
@@ -243,18 +314,28 @@ the guard, and keeps its own index assertion as a redundant belt.
 - [x] Closed-form vs. sample-based CRPS — settled: closed form for `Normal`,
       exact ensemble form for `Empirical`, trapezoidal pinball integral for
       `QuantileGrid`.
-- [ ] `forecast_moments` on a `QuantileGrid` treats the grid as the whole law
+- [x] `forecast_moments` on a `QuantileGrid` treats the grid as the whole law
       (flat tails), so it understates the variance of a heavy-tailed forecast —
-      ~8% at nu=5, ~24% at nu=3. QLIKE for Student-t GARCH is biased upward as
-      a result. Fix in `dist.py` (a parametric Student-t) or in
-      `forecast_moments` (tail extrapolation)?
-- [ ] Refit schedule API: per-model overrides, and `SupportsUpdate` on the
-      econometric models so `refit_every > 1` means "re-estimate every 21 days,
-      re-filter daily" rather than "freeze the forecast for 21 days".
+      ~8% at nu=5, ~24% at nu=3. QLIKE for Student-t GARCH was biased upward as
+      a result. **Resolved on `m2/evaluator-hardening`, in `dist.py`:** a
+      parametric `StudentT`; GARCH emits it; `forecast_moments` uses its
+      closed-form moments. `tests/test_qlike_student_t.py` reproduces the M1
+      report's floors on the old path and pins the new path below 1e-6. The
+      grid's understatement is unchanged and still documented — it is now only
+      reachable by objects that really are quantile grids.
+- [x] `SupportsUpdate` on the econometric models so `refit_every > 1` means
+      "re-estimate every 21 days, re-filter daily" rather than "freeze the
+      forecast for 21 days" — **resolved on `m2/evaluator-hardening`**, see
+      "Refit protocol". Still open: per-model refit-schedule overrides.
 - [ ] Multi-horizon: separate `Distribution` per h, or joint object? (`horizon`
       exists in the splitter and in result rows; only h=1 is exercised.)
-- [ ] Should a range/RV proxy feeding HAR be reconciled with the close-to-close
-      return target it is scored against? They are different quantities.
+- [x] Should a range/RV proxy feeding HAR be reconciled with the close-to-close
+      return target it is scored against? **Resolved (D-016):** HAR is fed and
+      scored on `overnight_plus_range_variance`, the close-to-close estimator.
+      Two follow-ups remain open (docs/M2_NOTES.md): HAR's retransformation
+      sensitivity to the target's noise, and whether the return-fed models
+      should also score QLIKE against the close-to-close proxy rather than
+      Parkinson.
 - [ ] TSFM context construction; alignment across calendars.
 - [ ] R interop (rugarch) — subprocess adapter or drop?
 - [ ] A `DataAdapter` protocol, and machine-readable licence metadata that

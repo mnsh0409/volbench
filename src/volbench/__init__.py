@@ -23,14 +23,16 @@ from volbench.data import (
     TimeSeriesFrame,
     garman_klass,
     log_returns,
+    overnight_plus_range_variance,
     parkinson,
     realized_variance_from_bars,
     squared_return,
 )
-from volbench.dist import Distribution, Empirical, Normal, QuantileGrid
+from volbench.dist import Distribution, Empirical, Normal, QuantileGrid, StudentT
 from volbench.evaluate import (
     DEFAULT_LEVELS,
     ModelFactory,
+    Recondition,
     SupportsUpdate,
     forecast_moments,
     run_backtest,
@@ -86,9 +88,11 @@ __all__ = [
     "Normal",
     "Origin",
     "QuantileGrid",
+    "Recondition",
     "ResultsStore",
     "RollingOriginSplitter",
     "SerialExecutor",
+    "StudentT",
     "SupportsUpdate",
     "TimeSeriesFrame",
     "__version__",
@@ -102,6 +106,7 @@ __all__ = [
     "log_returns",
     "mse",
     "normalize_frame",
+    "overnight_plus_range_variance",
     "package_version",
     "parkinson",
     "pinball",

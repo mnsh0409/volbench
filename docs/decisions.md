@@ -14,6 +14,38 @@ Revisit-if: …
 
 ---
 
+> NUMBERING NOTE (added by the m2/evaluator-hardening session, 2026-08-24):
+> D-013..D-016 below were appended from Claude Code to mirror decisions taken
+> during the M1 integration and M2 hardening work. D-014 matches the number
+> the task used for the QLIKE fix; the others are placed adjacent in the order
+> the decisions were listed. **D-012 is not mirrored here** — it belongs to the
+> planning machine, which is the source of truth for numbering. Reconcile
+> against the planning log and renumber if it disagrees.
+
+## D-016 · 2026-08-24 · HAR scoring target = per-day overnight + Rogers-Satchell   [SETTLED]
+Decision: HAR-RV is fed and scored against a per-day CLOSE-TO-CLOSE variance estimator, `overnight_plus_range_variance` = `(ln(O_t/C_{t-1}))^2 + RS_t` with `RS_t` the Rogers & Satchell (1991) drift-independent range term — not plain Parkinson, and not literal Yang-Zhang.
+Why: HAR forecasts the variance of the next close-to-close return, so it must be scored against an estimate of that quantity. A range proxy (Parkinson/Garman-Klass/RS alone) estimates only the intraday open-to-close variance and structurally omits the overnight jump (~9% of return variance in the toy fixture, more on real indices), biasing the scored forecast low (M1 report §4.4). Validated against the toy generator's known true variance: the new target's bias is ~a quarter of Parkinson's and its sampling variance ~7x below the squared return's (`tests/test_target_estimators.py`). RS is used, not Parkinson, for the intraday piece because it stays unbiased under drift; formulas corroborated 2026-08-24 across CRAN TTR, arXiv:1803.07152 and portfoliooptimizer.io (primary papers paywalled).
+Alternatives rejected: (a) Yang-Zhang — a windowed multi-day estimator; per-day it is undefined, and a window reaching past day t would put the future into day t's target (look-ahead). (b) squared daily return — unbiased but ~7x noisier. (c) leaving HAR on Parkinson — the M1 mismatch.
+Revisit-if: two open consequences, both in docs/M2_NOTES.md. (1) HAR's lognormal retransformation is sensitive to the target's log-space noise — on the toy this makes the "correct" target slightly worse-calibrated to the truth than the accidentally-well-calibrated Parkinson-fed HAR; a bias-corrected or component overnight+intraday HAR is the Phase-2 fix. (2) The return-fed models still score QLIKE against Parkinson though they too forecast close-to-close variance; scoring every model against the close-to-close proxy is the consistent end state, to be decided deliberately.
+
+## D-015 · 2026-08-24 · Refit protocol = re-estimate every N, re-condition daily   [SETTLED]
+Decision: "refit every N days" (D-014-planning: N=21) means parameters are re-estimated every N origins AND the model's conditional state is re-filtered on every origin's window in between (`recondition="daily"`, the default). The frozen behaviour — the forecast issued at the refit origin held until the next — stays available as an explicit ablation arm (`recondition="none"`), never as a default.
+Why: at M1 no model implemented re-conditioning, so `refit_every=21` silently meant "freeze the forecast for 21 days", ignoring three weeks of realized returns — not the protocol docs/research_design.md describes, and a misleading reported cadence (M1 report §4.3). `update()` re-filters at fixed parameters (GARCH via arch's `ARCHModel.fix`, verified to reproduce the fit's conditional variances to <1e-8; EWMA/HAR/naive by their own recursions), never re-estimating.
+Alternatives rejected: refit-only-no-recondition as the default (the M1 behaviour — understates the information available at each origin); off-schedule refit on the fly (would change the cadence the config hash records).
+Revisit-if: per-model refit-schedule overrides are still open. `recondition` enters the config hash only when `refit_every>1` (it cannot change a number otherwise).
+
+## D-014 · 2026-08-24 · QLIKE bias fix = parametric StudentT distribution   [SETTLED]
+Decision: Student-t GARCH forecasts return a parametric `StudentT(loc, scale, df)` (closed-form mean/variance/CRPS) instead of a 199-point quantile grid; `forecast_moments` reads a distribution's own closed-form moments before falling back to a grid estimate.
+Why: the grid spanned tau in [0.005, 0.995] with flat tails, and the evaluator's moments of that grid truncated the Student-t's tails — understating the variance ~24% at nu=3, so a *perfectly specified* forecast scored a QLIKE floor of 0.0407 instead of 0 (M1 report §4.2), growing exactly where the Student-t spec is meant to win. The parametric object removes the bias at its source with no RNG, so scoring stays bit-identical across runs. CRPS verified against numerical integration of two independent representations.
+Alternatives rejected: tail-extrapolating the grid's moments (a patch on a lossy representation); sample-based Student-t (needs an RNG, breaks determinism).
+Revisit-if: n/a — closed at the root.
+
+## D-013 · 2026-08-23 · Milestone M1 complete; Phase 1 design confirmed   [SETTLED]
+Decision: M1 (leakage-safe evaluation skeleton) is complete and tagged `v0.1.0-m1`. The Phase 1 design — RollingOriginSplitter as the sole index source, Distribution as the only forecast currency, content-addressed ResultsStore, serial Executor seam — held under integration and is confirmed as the base for Phase 2.
+Why: three parallel streams (data, models, evaluation) merged with zero conflicts on disjoint file ownership; a toy benchmark runs four baselines over 200 rolling origins deterministically in ~2s; `make reproduce` rebuilds it from scratch. Full record in docs/M1_REPORT.md.
+Alternatives rejected: n/a — milestone confirmation.
+Revisit-if: the four §4 open items are addressed on m2/evaluator-hardening (D-014, D-015, D-016 close §4.2, §4.3, §4.4; §4.5/§4.6 fixed earlier on the branch). Highest remaining Phase-2 risks are recorded in docs/M1_REPORT.md §6.
+
 ## D-011 · 2026-08-22 · Slurm A100 cluster = scale backend, not dev machine   [SETTLED]
 Decision: keep interactive development on the 4090 (D-010); use the Slurm A100 cluster as an EXECUTION BACKEND for the Phase 3 grid and ablations. volbench gets a pluggable `Executor` seam from Phase 1 (serial now; local-multiprocessing and Slurm-array backends in Phase 2), with results merged by config_hash in the ResultsStore.
 Why not develop on Slurm: batch queues make iteration latency unpredictable; Claude Code wants a persistent interactive shell; login nodes are not for compute. Why not skip Slurm: it converts CFP pillar 3 (forecasting at scale) from a paragraph into a measured result.

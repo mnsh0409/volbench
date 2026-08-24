@@ -12,12 +12,15 @@ units. The catch: `res.forecast(...).variance` is reported in the
 before returning is required, or this would silently violate the
 daily-units-only rule (CLAUDE.md rule 2).
 
-Student-t innovations: the natural predictive distribution is a scaled
-Student-t, for which `Distribution` has no closed-form constructor. We use
-`Distribution.from_quantiles` over a fixed grid rather than
-`from_samples`: it needs no RNG seed, so the same fitted model scores
-bit-identically across runs (CLAUDE.md rule 3), and a fine grid's CRPS is
-close to exact (Laio & Tamea, 2007) without Monte Carlo sampling error.
+Student-t innovations: the predictive distribution is the parametric
+`StudentT` (location 0, `nu` from the fit, scale derived from the conditional
+variance via `StudentT.from_variance`, so that its `variance()` is exactly
+`arch`'s conditional variance). Until m2/evaluator-hardening this was a
+199-point quantile grid over tau in [0.005, 0.995]; the evaluator's moments of
+that grid truncated the tails, and a *perfectly specified* forecast could not
+score below a QLIKE floor of 0.0407 at nu=3 (docs/M1_REPORT.md §4.2). The
+parametric object has closed-form moments and CRPS and needs no RNG, so the
+same fitted model still scores bit-identically across runs (CLAUDE.md rule 3).
 
 Non-convergence: if the optimizer fails to converge (`convergence_flag !=
 0`, including a degenerate fitted `nu <= 2` for Student-t, where the
@@ -26,10 +29,23 @@ falls back to `EWMA(lambda_=fallback_lambda)` on the same training window
 and records `fallback=True` on the fitted object, per the HARD RULES for
 this stream: an origin must get a usable forecast, never a raised
 exception that drops it from the grid.
+
+Re-conditioning between refits (docs/M1_REPORT.md §4.3): `update(train)`
+re-filters the conditional variance over the current window at the
+parameters estimated at the last scheduled refit, through `arch`'s
+`ARCHModel.fix` — the same specification rebuilt on the new window and
+evaluated at fixed parameters, with no optimizer involved. The window is
+pre-multiplied by the fit's `scale` and the fixed model is built with
+`rescale=False`, so the parameters keep the units they were estimated in
+and `predict` undoes the scale exactly as before. On the fit's own window
+`fix` reproduces the fitted forecast and every in-sample conditional
+variance to the bit, which is also the proof that the scale handling is
+right (tests/test_models_update.py).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import math
 from dataclasses import dataclass
@@ -37,11 +53,10 @@ from typing import Any, Literal
 
 import numpy as np
 from arch import arch_model
-from arch.univariate.base import ARCHModelResult
+from arch.univariate.base import ARCHModelFixedResult, ARCHModelResult
 from numpy.typing import NDArray
-from scipy import stats  # type: ignore[import-untyped]
 
-from volbench.dist import Distribution, Normal
+from volbench.dist import Distribution, Normal, StudentT
 from volbench.models.ewma import EWMA, FittedEWMA
 
 __all__ = ["GARCH", "FittedGARCH", "gjr_garch"]
@@ -51,14 +66,6 @@ logger = logging.getLogger(__name__)
 _Dist = Literal["normal", "studentst"]
 _MIN_TRAIN = 20
 _MIN_NU = 2.02  # Student-t variance nu/(nu-2) blows up as nu -> 2
-_N_QUANTILES = 199
-_TAUS: NDArray[np.float64] = np.linspace(0.005, 0.995, _N_QUANTILES)
-
-
-def _student_t_quantile_grid(sigma2: float, nu: float) -> Distribution:
-    scale = math.sqrt(sigma2 * (nu - 2.0) / nu)
-    values = scale * stats.t.ppf(_TAUS, df=nu)
-    return Distribution.from_quantiles(_TAUS, values)
 
 
 @dataclass(frozen=True)
@@ -68,7 +75,10 @@ class FittedGARCH:
     dist: _Dist
     fallback_lambda: float
     fallback: bool
-    result: ARCHModelResult | None
+    #: The scheduled fit (an ``ARCHModelResult``) or, after ``update``, the
+    #: same parameters fixed on a newer window (an ``ARCHModelFixedResult``,
+    #: which the fitted result subclasses). ``None`` on a fallback fit.
+    result: ARCHModelFixedResult | None
     scale: float
     fallback_fit: FittedEWMA | None
 
@@ -95,7 +105,35 @@ class FittedGARCH:
         if self.dist == "normal":
             return Normal(mu=0.0, sigma=math.sqrt(sigma2))
         nu = float(self.result.params["nu"])
-        return _student_t_quantile_grid(sigma2=sigma2, nu=nu)
+        return StudentT.from_variance(0.0, sigma2, nu)
+
+    def update(self, train: NDArray[np.float64]) -> FittedGARCH:
+        """Re-filter the conditional variance over ``train`` at fixed parameters.
+
+        Nothing is re-estimated: the parameters (including ``nu``) and the
+        ``scale`` are those of the last scheduled fit; only the variance path
+        — and therefore the forecast — is re-conditioned on the new window.
+        A fallback fit re-conditions its EWMA instead. See the module
+        docstring for the ``rescale`` handling.
+        """
+        arr = np.asarray(train, dtype=np.float64)
+        if arr.ndim != 1 or arr.size < _MIN_TRAIN:
+            raise ValueError(f"train must be a 1-D array with at least {_MIN_TRAIN} returns")
+        if self.fallback:
+            assert self.fallback_fit is not None
+            return dataclasses.replace(self, fallback_fit=self.fallback_fit.update(arr))
+        assert self.result is not None
+        fixed = arch_model(
+            arr * self.scale,
+            mean="Zero",
+            vol="GARCH",
+            p=1,
+            o=self.o,
+            q=1,
+            dist=self.dist,
+            rescale=False,
+        ).fix(self.result.params)
+        return dataclasses.replace(self, result=fixed)
 
 
 @dataclass(frozen=True)

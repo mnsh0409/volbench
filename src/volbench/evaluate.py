@@ -33,13 +33,13 @@ import logging
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, Protocol, runtime_checkable
+from typing import Any, Final, Literal, Protocol, runtime_checkable
 
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-from volbench.dist import Distribution, Empirical, Normal, QuantileGrid
+from volbench.dist import Distribution, Empirical, QuantileGrid
 from volbench.execute import Executor, SerialExecutor
 from volbench.metrics import qlike
 from volbench.models.base import FittedModel, ForecastModel
@@ -57,10 +57,21 @@ __all__ = [
     "FittedModel",
     "ForecastModel",
     "ModelFactory",
+    "Recondition",
     "SupportsUpdate",
     "forecast_moments",
     "run_backtest",
 ]
+
+#: What happens at the origins between two scheduled refits.
+#:
+#: ``"daily"`` — the reading of "refit every N days" fixed after M1 report
+#: §4.3: parameters come from the last scheduled refit and the model's
+#: conditional state is re-filtered on every origin's window through
+#: :class:`SupportsUpdate`. ``"none"`` — the forecast is frozen between refits:
+#: the behaviour every baseline had before ``update`` existed, kept as an
+#: explicit ablation arm rather than a default anyone can fall into.
+Recondition = Literal["daily", "none"]
 
 logger = logging.getLogger(__name__)
 
@@ -99,13 +110,17 @@ class SupportsUpdate(Protocol):
     A GARCH forecast for day ``t`` normally uses parameters estimated at the
     last scheduled refit but conditions on returns *through* ``t``. With a
     ``predict(h)``-only interface there is nowhere to put that newer data, so
-    a model that filters recent observations should implement ``update``:
-    volbench calls it at non-refit origins with the current training window.
+    a model that filters recent observations implements ``update``: volbench
+    calls it at every non-refit origin with that origin's training window —
+    observations dated at or before the origin, exactly what ``fit`` would
+    have been handed — when the backtest runs with ``recondition="daily"``
+    (the default). Under ``recondition="none"`` it is never called.
 
     Implementations **must not re-estimate parameters** in ``update`` — that
     would silently defeat the refit schedule and make the reported refit
-    cadence a lie. Models without it hold their forecast constant between
-    refits, which the ``conditioned_through`` result column records.
+    cadence a lie. Every Phase 1 baseline implements it (M1 report §4.3 is
+    closed); a model without it holds its forecast constant between refits,
+    which the ``conditioned_through`` result column records either way.
     """
 
     def update(self, train: NDArray[np.float64]) -> FittedModel:
@@ -150,10 +165,13 @@ def forecast_moments(dist: Distribution) -> tuple[float, float]:
 
     The variance is the model's variance forecast (the fixed Phase 1
     convention), so it is what QLIKE scores against the proxy. Computed
-    through :class:`~volbench.dist.Distribution`'s public interface only —
-    ``dist.py`` is frozen for this phase.
+    through :class:`~volbench.dist.Distribution`'s public interface only.
 
-    - :class:`~volbench.dist.Normal`: closed form.
+    - Parametric families — :class:`~volbench.dist.Normal`,
+      :class:`~volbench.dist.StudentT`, anything implementing ``mean()`` and
+      ``variance()``: their own closed forms, asked for first. This is what
+      closed M1 report §4.2: a Student-t forecast used to arrive as a quantile
+      grid, and the grid's moments truncated its tails.
     - :class:`~volbench.dist.Empirical`: the plug-in moments of the sample.
       ``ddof=0`` deliberately — the ensemble *is* the predictive law here, the
       same reading under which ``Empirical.crps`` is exact rather than an
@@ -161,9 +179,13 @@ def forecast_moments(dist: Distribution) -> tuple[float, float]:
     - :class:`~volbench.dist.QuantileGrid`: exact for the interpolated law.
     - anything else: quadrature over a dense quantile grid, which truncates
       mass beyond the outermost tau and so understates very heavy tails.
+      Genuinely non-parametric objects are the only ones that should land
+      here.
     """
-    if isinstance(dist, Normal):
-        return dist.mu, dist.sigma * dist.sigma
+    try:
+        return dist.mean(), dist.variance()
+    except NotImplementedError:
+        pass
     if isinstance(dist, Empirical):
         return float(np.mean(dist.samples)), float(np.var(dist.samples))
     if isinstance(dist, QuantileGrid):
@@ -358,6 +380,7 @@ class _BlockTask:
     proxy_name: str
     config_hash: str
     seed: int
+    recondition: Recondition
 
 
 def _blocks(origins: Sequence[Origin]) -> list[tuple[Origin, ...]]:
@@ -449,7 +472,7 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
             # The block's scheduled fit failed: nothing to hold or update, and
             # no off-schedule refit (see the docstring).
             origin_failure = block_failure
-        elif isinstance(fitted, SupportsUpdate):
+        elif task.recondition == "daily" and isinstance(fitted, SupportsUpdate):
             try:
                 fitted = fitted.update(task.fit_series[origin.train])
             except Exception as exc:
@@ -459,8 +482,10 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
                 conditioned_through = origin.origin
                 origin_failure = None
         else:
-            # No update capability: the forecast still rests on the last
-            # refit's information set, which is what gets recorded.
+            # Hold: either the model cannot re-condition, or
+            # recondition="none" asked for the frozen forecast (the ablation
+            # arm). Either way the forecast still rests on the last refit's
+            # information set, which is what gets recorded.
             conditioned_through = fit_origin
             origin_failure = None
 
@@ -593,6 +618,7 @@ def run_backtest(
     executor: Executor | None = None,
     store: ResultsStore | None = None,
     overwrite: bool = False,
+    recondition: Recondition = "daily",
 ) -> pd.DataFrame:
     """Score ``model_factory`` over ``series`` at every rolling origin.
 
@@ -658,6 +684,16 @@ def run_backtest(
         persisted before returning.
     overwrite:
         Recompute and replace a stored result instead of reading it.
+    recondition:
+        What happens between scheduled refits. ``"daily"`` (default):
+        parameters from the last refit, conditional state re-filtered on each
+        origin's window via :class:`SupportsUpdate`. ``"none"``: the forecast
+        is frozen until the next refit — the ablation arm. Part of the config
+        hash whenever it can change a number, i.e. whenever
+        ``splitter.refit_every > 1``; at ``refit_every == 1`` every origin
+        refits, ``update`` is unreachable, and the run is the same experiment
+        under either setting — so it is not recorded and the hash does not
+        move.
 
     Returns
     -------
@@ -668,9 +704,11 @@ def run_backtest(
     -----
     Refit cadence comes from ``splitter``: a fit happens only at origins where
     ``origin.refit`` is true, so the number of ``fit`` calls equals the number
-    of refit origins. Models implementing :class:`SupportsUpdate` re-condition
-    (without re-estimating) at the origins in between; the rest hold their
-    forecast, and ``conditioned_through`` records which happened.
+    of refit origins. Under ``recondition="daily"``, models implementing
+    :class:`SupportsUpdate` re-condition (without re-estimating) at the
+    origins in between; under ``"none"``, and for models without the
+    capability, the forecast is held. ``conditioned_through`` records which
+    happened on every row, so the two are never confused after the fact.
 
     Exceptions are isolated per origin. A ``fit``, ``update``, ``predict`` or
     scoring exception produces a row with NaN scores and a ``missing_reason``
@@ -689,6 +727,8 @@ def run_backtest(
         raise ValueError(f"levels must be distinct, got {levels_tuple}")
     if not all(0.0 < level < 1.0 for level in levels_tuple):
         raise ValueError(f"levels must lie strictly inside (0, 1), got {levels_tuple}")
+    if recondition not in ("daily", "none"):
+        raise ValueError(f"recondition must be 'daily' or 'none', got {recondition!r}")
 
     _require_one_calendar(("series", series), ("proxy", proxy), ("fit_series", fit_series))
     series_array = _as_series(series, "series")
@@ -714,6 +754,10 @@ def run_backtest(
         splitter=splitter,
         seed=seed,
         scoring={"levels": list(levels_tuple)},
+        # Recorded exactly when it binds (see the parameter docstring): with
+        # one refit per origin there is nothing to re-condition, and a setting
+        # that cannot change a number is not part of the experiment's identity.
+        protocol={"recondition": recondition} if splitter.refit_every > 1 else None,
     )
     hash_value = config_hash(config)
 
@@ -738,6 +782,7 @@ def run_backtest(
             proxy_name=proxy_name,
             config_hash=hash_value,
             seed=int(seed),
+            recondition=recondition,
         )
         for block in _blocks(origins)
     ]

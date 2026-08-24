@@ -19,6 +19,7 @@ import pandas as pd
 __all__ = [
     "garman_klass",
     "log_returns",
+    "overnight_plus_range_variance",
     "parkinson",
     "realized_variance_from_bars",
     "squared_return",
@@ -104,6 +105,101 @@ def garman_klass(
     hl_term = _log(h / lo) ** 2
     co_term = _log(c / o) ** 2
     out: pd.Series = (0.5 * hl_term - _GK_CLOSE_COEF * co_term).rename("garman_klass")
+    return out
+
+
+def _check_ohlc(open_: pd.Series, high: pd.Series, low: pd.Series, close: pd.Series) -> None:
+    """A bar whose open or close lies outside [low, high] is not a bar.
+
+    Stricter than the range proxies above, which only check ``high >= low``:
+    the Rogers-Satchell terms are products of two logs that share a sign
+    only when the open and close sit inside the range, so an inconsistent
+    bar can turn the estimator negative — and HAR takes its log.
+    """
+    if (high < low).any():
+        raise ValueError("high must be >= low at every observation")
+    if (high < open_).any() or (high < close).any():
+        raise ValueError("high must be >= open and >= close at every observation")
+    if (low > open_).any() or (low > close).any():
+        raise ValueError("low must be <= open and <= close at every observation")
+
+
+def _rogers_satchell(
+    open_: pd.Series, high: pd.Series, low: pd.Series, close: pd.Series
+) -> pd.Series:
+    """Rogers & Satchell (1991) per-day estimator of the open-to-close variance.
+
+    ``ln(H/O) ln(H/C) + ln(L/O) ln(L/C)``. Unbiased for the diffusion variance
+    of a Brownian motion with *any* drift (their result), which Parkinson and
+    Garman-Klass are not; blind, by construction, to what happens between the
+    previous close and today's open.
+    """
+    hi_open, hi_close = _log(high / open_), _log(high / close)
+    lo_open, lo_close = _log(low / open_), _log(low / close)
+    out: pd.Series = hi_open * hi_close + lo_open * lo_close
+    return out
+
+
+def overnight_plus_range_variance(
+    open_: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+) -> pd.Series:
+    """Per-day close-to-close variance estimate: squared overnight jump plus Rogers-Satchell.
+
+    ``(ln(O_t / C_{t-1}))^2 + ln(H_t/O_t) ln(H_t/C_t) + ln(L_t/O_t) ln(L_t/C_t)``,
+    daily units. The first observation is NaN — there is no ``C_{t-1}`` for
+    it — and is left as a gap so the output stays index-aligned with its
+    inputs (the same convention as :func:`squared_return`).
+
+    Why it exists (M1 report §4.4): a range proxy — Parkinson, Garman-Klass,
+    Rogers-Satchell — estimates the variance *between the open and the close*.
+    The quantity every volbench model forecasts, and is scored on, is the
+    variance of the close-to-close return, which also contains the overnight
+    jump ``ln(O_t / C_{t-1})``. Feeding HAR a range proxy and scoring it
+    against close-to-close returns therefore biased its variance forecast low
+    by the overnight share, independent of any model error. This target puts
+    the two pieces back together, day by day: the squared overnight jump is an
+    unbiased (if noisy) estimate of the overnight variance, and Rogers-Satchell
+    is the intraday estimator that stays unbiased under drift.
+
+    What it is *not*: Yang & Zhang (2000). YZ is a **windowed** estimator over
+    ``n`` days — ``sigma_o^2 + k sigma_c^2 + (1 - k) sigma_RS^2`` with
+    ``sigma_o^2``/``sigma_c^2`` the *demeaned sample variances* of the
+    overnight and open-to-close returns across the window, ``sigma_RS^2`` the
+    window average of RS, and ``k = 0.34 / (1.34 + (n + 1) / (n - 1))``.
+    That is an excellent *volatility* estimator and the wrong *target*: a
+    forecast for day ``t`` must be scored against day ``t``'s own realization,
+    and a window ending after ``t`` would put the future into the target.
+    Demeaning across a window is also what makes YZ drift-independent in the
+    overnight term; per day there is nothing to demean, so this estimator is
+    unbiased under zero drift — the standard daily-return assumption every
+    baseline here already makes.
+
+    Sources. Rogers, L. C. G. & Satchell, S. E. (1991), "Estimating Variance
+    From High, Low and Closing Prices", *Annals of Applied Probability* 1(4),
+    504-512, doi:10.1214/aoap/1177005835. Yang, D. & Zhang, Q. (2000),
+    "Drift-Independent Volatility Estimation Based on High, Low, Open, and
+    Close Prices", *Journal of Business* 73(3), 477-492. Both full texts are
+    paywalled; the formulas were corroborated (2026-08-24) across CRAN's TTR
+    package documentation (``volatility``, calc="rogers.satchell" and
+    "yang.zhang"), arXiv:1803.07152 §2, and portfoliooptimizer.io's
+    range-estimator overview, which agree with each other and with the
+    Project Euclid abstract's drift-independence claim.
+
+    Bars must be consistent: ``low <= min(open, close) <= max(open, close) <=
+    high``. Anything else raises rather than yielding a negative variance.
+    """
+    o = open_.astype(np.float64)
+    h = high.astype(np.float64)
+    lo = low.astype(np.float64)
+    c = close.astype(np.float64)
+    _check_ohlc(o, h, lo, c)
+    overnight = _log(o / c.shift(1))  # NaN on the first day: no previous close
+    out: pd.Series = (overnight**2 + _rogers_satchell(o, h, lo, c)).rename(
+        "overnight_plus_range"
+    )
     return out
 
 
