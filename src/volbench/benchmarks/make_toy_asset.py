@@ -45,7 +45,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-import pandas as pd  # type: ignore[import-untyped]
+import pandas as pd
 from numpy.typing import NDArray
 
 __all__ = ["DEFAULT_PATH", "simulate_ohlc", "write_toy_asset"]

@@ -145,6 +145,18 @@
   and a `missing_reason` naming every cause, so a model cannot look good by
   averaging over the origins that happened to work.
 
+  **Hardened since `m2/evaluator-hardening` (was open at M1, report §4.5):**
+  that contract now covers exceptions too. A `fit`, `update`, `predict` or
+  scoring exception becomes a NaN row whose `missing_reason` is
+  `<stage>[@origin]: <ExceptionType>: <message>` — e.g. `fit_error@499:
+  ValueError: realized-variance series must be finite and strictly positive`
+  — instead of aborting the cell. A failed *scheduled* fit fails its whole
+  block (there is no off-schedule refit, so the cadence the config hash
+  describes stays true); a failed `update` costs one origin. Rows with no
+  fitted model carry `fit_origin = conditioned_through = -1`. Only
+  `Exception` is caught — `KeyboardInterrupt`/`SystemExit` propagate. Every
+  failure is logged at WARNING on `volbench.evaluate`.
+
   **Added beyond the plan:** `SupportsUpdate`, an optional Protocol letting a
   model re-condition on newer data between scheduled refits without
   re-estimating. **No Phase 1 model implements it**, so at `refit_every > 1`
@@ -217,12 +229,15 @@ the `package_version()` that enters every config hash.
 4. Scalers/feature transforms fit on train windows only, inside the splitter's
    contract.
 
-**Not yet an enforced invariant:** `run_backtest` aligns `series`, `proxy` and
-`fit_series` *positionally* and validates only their length. One calendar must
-govern all three; two same-length arrays off by a day would silently score
-every forecast against the following day's realization. `benchmarks/toy.py`
-asserts index equality before converting to arrays — the pattern to copy — but
-nothing forces a caller to.
+**Enforced since `m2/evaluator-hardening` (was open at M1, report §4.6):**
+`run_backtest` aligns `series`, `proxy` and `fit_series` *positionally*, so it
+now requires them to be on one calendar. Pandas inputs must carry identical
+indexes — values and order, checked with `Index.equals`, the first mismatching
+position named in the `ValueError`; mixing an indexed input with a bare array
+is refused. Bare arrays for *every* input remain accepted as an explicit
+positional opt-in (only lengths are checked), because they carry no calendar
+to compare. `benchmarks/toy.py` passes indexed Series so its path exercises
+the guard, and keeps its own index assertion as a redundant belt.
 
 ## Open questions (carried into Phase 2)
 - [x] Closed-form vs. sample-based CRPS — settled: closed form for `Normal`,

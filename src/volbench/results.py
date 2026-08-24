@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import numpy as np
-import pandas as pd  # type: ignore[import-untyped]  # no stubs; pyproject is another stream's file
+import pandas as pd
 from numpy.typing import NDArray
 
 from volbench.splitter import RollingOriginSplitter

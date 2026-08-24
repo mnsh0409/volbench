@@ -732,6 +732,107 @@ def test_misaligned_proxy_is_rejected() -> None:
         backtest(OracleNormal(SIGMA), returns, proxy[:-1], make_splitter())
 
 
+# --------------------------------------------------------------------------
+# one calendar (M1 report §4.6)
+# --------------------------------------------------------------------------
+#
+# ``run_backtest`` aligns by position. Two same-length inputs on different
+# calendars would score every forecast against the wrong day's realization —
+# leakage no other test can see, because every score would still be a
+# perfectly plausible number. Pandas inputs carry the calendar, so the guard
+# can be structural: identical indexes, or no run.
+
+
+def _dated(values: NDArray[np.float64], start: str = "2020-01-01") -> pd.Series:
+    index = pd.date_range(start, periods=values.size, freq="B", tz="UTC")
+    return pd.Series(values, index=index)
+
+
+def test_inputs_shifted_by_one_day_are_rejected_naming_the_first_mismatch() -> None:
+    """The headline case: same length, same values, calendars one day apart."""
+    returns, proxy = simulated_panel(n=400)
+    dated_returns = _dated(returns)
+    shifted_proxy = pd.Series(proxy, index=dated_returns.index.shift(1, freq="B"))
+
+    with pytest.raises(ValueError, match="first mismatch at position 0") as info:
+        backtest(OracleNormal(SIGMA), dated_returns, shifted_proxy, make_splitter())
+
+    message = str(info.value)
+    # Names both inputs, both offending timestamps, and why it matters.
+    assert "proxy is not on the same calendar as series" in message
+    assert str(dated_returns.index[0]) in message
+    assert str(shifted_proxy.index[0]) in message
+    assert "wrong day's realization" in message
+
+
+def test_a_shift_deep_in_the_series_names_that_position() -> None:
+    returns, proxy = simulated_panel(n=400)
+    dated_returns = _dated(returns)
+    calendar = dated_returns.index.to_list()
+    calendar[123] = calendar[123] + pd.Timedelta(hours=1)
+    off_by_an_hour = pd.Series(proxy, index=pd.DatetimeIndex(calendar))
+
+    with pytest.raises(ValueError, match="first mismatch at position 123"):
+        backtest(OracleNormal(SIGMA), dated_returns, off_by_an_hour, make_splitter())
+
+
+def test_fit_series_must_share_the_calendar_too() -> None:
+    returns, proxy = simulated_panel(n=400)
+    dated_returns, dated_proxy = _dated(returns), _dated(proxy)
+    shifted_fit = pd.Series(proxy, index=dated_returns.index.shift(1, freq="B"))
+
+    with pytest.raises(ValueError, match="fit_series is not on the same calendar as series"):
+        backtest(
+            OracleNormal(SIGMA), dated_returns, dated_proxy, make_splitter(), fit_series=shifted_fit
+        )
+
+
+def test_an_input_that_ran_out_early_is_named_as_such() -> None:
+    returns, proxy = simulated_panel(n=400)
+    dated_returns = _dated(returns)
+    truncated_proxy = _dated(proxy).iloc[:-1]
+
+    with pytest.raises(ValueError, match=r"position 399, where proxy has run out"):
+        backtest(OracleNormal(SIGMA), dated_returns, truncated_proxy, make_splitter())
+
+
+def test_a_calendar_cannot_be_compared_with_positions() -> None:
+    """Dropping the index on one side (a stray ``.to_numpy()`` then
+    ``pd.Series``) leaves a RangeIndex, which is not a calendar."""
+    returns, proxy = simulated_panel(n=400)
+    with pytest.raises(ValueError, match="first mismatch at position 0"):
+        backtest(OracleNormal(SIGMA), _dated(returns), pd.Series(proxy), make_splitter())
+
+
+def test_mixing_indexed_and_bare_inputs_is_refused() -> None:
+    returns, proxy = simulated_panel(n=400)
+    with pytest.raises(ValueError, match="proxy is a bare array"):
+        backtest(OracleNormal(SIGMA), _dated(returns), proxy, make_splitter())
+    with pytest.raises(ValueError, match="fit_series is a bare array"):
+        backtest(
+            OracleNormal(SIGMA), _dated(returns), _dated(proxy), make_splitter(), fit_series=proxy
+        )
+
+
+def test_inputs_on_one_calendar_score_exactly_as_bare_arrays_do() -> None:
+    """The guard validates the calendar; it does not change a single number,
+    and it does not enter the config hash — same values, same experiment."""
+    returns, proxy = simulated_panel(n=400)
+    splitter = make_splitter(refit_every=5)
+    bare = backtest(SpyModel(), returns, proxy, splitter)
+    dated = backtest(SpyModel(), _dated(returns), _dated(proxy), splitter)
+    pd.testing.assert_frame_equal(bare, dated)
+    assert bare.attrs["config_hash"] == dated.attrs["config_hash"]
+
+
+def test_bare_arrays_remain_an_explicit_positional_opt_in() -> None:
+    """No calendar to check means nothing to check; only lengths are compared.
+    This is the README quickstart's path and must keep working."""
+    returns, proxy = simulated_panel(n=400)
+    frame = backtest(OracleNormal(SIGMA), returns, proxy, make_splitter())
+    assert len(frame) == make_splitter().n_splits(returns.size)
+
+
 def test_bad_levels_are_rejected() -> None:
     returns, proxy = simulated_panel(n=400)
     splitter = make_splitter()

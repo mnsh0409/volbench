@@ -227,8 +227,8 @@ class TestLeakageCanary:
         corrupted_proxy = proxy.copy()
         rng = np.random.default_rng(999)
         n_tail = returns.size - (cutoff + 1)
-        corrupted_returns[cutoff + 1 :] = rng.normal(0.0, 0.5, size=n_tail)
-        corrupted_proxy[cutoff + 1 :] = np.exp(rng.normal(0.0, 1.0, size=n_tail))
+        corrupted_returns.iloc[cutoff + 1 :] = rng.normal(0.0, 0.5, size=n_tail)
+        corrupted_proxy.iloc[cutoff + 1 :] = np.exp(rng.normal(0.0, 1.0, size=n_tail))
 
         clean = self._run(returns, proxy)
         dirty = self._run(corrupted_returns, corrupted_proxy)
@@ -255,7 +255,7 @@ class TestLeakageCanary:
 
         corrupted_returns = returns.copy()
         rng = np.random.default_rng(1234)
-        corrupted_returns[: cutoff + 1] = rng.normal(0.0, 0.5, size=cutoff + 1)
+        corrupted_returns.iloc[: cutoff + 1] = rng.normal(0.0, 0.5, size=cutoff + 1)
 
         clean = self._run(returns, proxy)
         dirty = self._run(corrupted_returns, proxy)
