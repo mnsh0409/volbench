@@ -145,6 +145,18 @@
   and a `missing_reason` naming every cause, so a model cannot look good by
   averaging over the origins that happened to work.
 
+  **Hardened since `m2/evaluator-hardening` (was open at M1, report §4.5):**
+  that contract now covers exceptions too. A `fit`, `update`, `predict` or
+  scoring exception becomes a NaN row whose `missing_reason` is
+  `<stage>[@origin]: <ExceptionType>: <message>` — e.g. `fit_error@499:
+  ValueError: realized-variance series must be finite and strictly positive`
+  — instead of aborting the cell. A failed *scheduled* fit fails its whole
+  block (there is no off-schedule refit, so the cadence the config hash
+  describes stays true); a failed `update` costs one origin. Rows with no
+  fitted model carry `fit_origin = conditioned_through = -1`. Only
+  `Exception` is caught — `KeyboardInterrupt`/`SystemExit` propagate. Every
+  failure is logged at WARNING on `volbench.evaluate`.
+
   **Added beyond the plan:** `SupportsUpdate`, an optional Protocol letting a
   model re-condition on newer data between scheduled refits without
   re-estimating. **No Phase 1 model implements it**, so at `refit_every > 1`

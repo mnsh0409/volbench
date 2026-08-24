@@ -29,6 +29,7 @@ allowed to serve (:mod:`volbench.results`).
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -60,6 +61,8 @@ __all__ = [
     "forecast_moments",
     "run_backtest",
 ]
+
+logger = logging.getLogger(__name__)
 
 #: Tail levels for pinball loss and VaR, per docs/metrics_reference.md.
 DEFAULT_LEVELS: Final = (0.01, 0.025, 0.05)
@@ -252,8 +255,8 @@ def _result_dtypes(levels: tuple[float, ...]) -> dict[str, str]:
         "origin_index": "int64",
         "horizon": "int64",
         "target_index": "int64",
-        "fit_origin": "int64",
-        "conditioned_through": "int64",
+        "fit_origin": "int64",  # -1 on rows that had no fitted model (see _run_block)
+        "conditioned_through": "int64",  # likewise
         "refit": "bool",
         "seed": "int64",
         "forecast_mean": "float64",
@@ -272,6 +275,62 @@ def _result_dtypes(levels: tuple[float, ...]) -> dict[str, str]:
         dtypes[f"pinball_{tag}"] = "float64"
         dtypes[f"hit_{tag}"] = "float64"
     return dtypes
+
+
+# --------------------------------------------------------------------------
+# fault isolation — one bad origin costs one row, never the cell
+# --------------------------------------------------------------------------
+
+
+def _exception_reason(stage: str, exc: BaseException, *, origin: int | None = None) -> str:
+    """``missing_reason`` token for an exception: stage, type and message.
+
+    ``fit_error@499: ValueError: realized-variance series must be finite and
+    strictly positive``. The origin is named for the stages whose failure can
+    affect rows at *other* origins (a scheduled fit serves its whole block).
+    Whitespace inside the message is collapsed so the token stays one line in
+    a table; nothing else is altered or truncated.
+    """
+    message = " ".join(str(exc).split())
+    where = f"@{origin}" if origin is not None else ""
+    return f"{stage}{where}: {type(exc).__name__}" + (f": {message}" if message else "")
+
+
+def _failure_scores(levels: tuple[float, ...], reason: str) -> dict[str, Any]:
+    """The score columns of a row whose forecast never happened.
+
+    Same keys as :func:`_score`, NaN throughout, so a failure row has the
+    frame's full schema and the pinned dtypes still apply.
+    """
+    out: dict[str, Any] = {
+        "forecast_mean": math.nan,
+        "forecast_var": math.nan,
+        "crps": math.nan,
+        "log_score": math.nan,
+        "qlike": math.nan,
+    }
+    for level in levels:
+        tag = _level_tag(level)
+        out[f"var_{tag}"] = math.nan
+        out[f"pinball_{tag}"] = math.nan
+        out[f"hit_{tag}"] = math.nan
+    out["missing_reason"] = reason
+    return out
+
+
+def _log_failure(model_name: str, asset: str, origin: int, reason: str, exc: BaseException) -> None:
+    # One line per failed origin, always: a run that failed 300 origins should
+    # look like one. The traceback is attached only at DEBUG, because one bad
+    # day inside a long window fails every origin whose window contains it,
+    # and a traceback per origin would bury the signal.
+    logger.warning(
+        "%s on %s: %s (origin %d)",
+        model_name,
+        asset,
+        reason,
+        origin,
+        exc_info=exc if logger.isEnabledFor(logging.DEBUG) else None,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -316,29 +375,97 @@ def _blocks(origins: Sequence[Origin]) -> list[tuple[Origin, ...]]:
     return [tuple(block) for block in blocks]
 
 
+def _forecast_and_score(
+    fitted: FittedModel | None,
+    horizon: int,
+    realized_return: float,
+    proxy_var: float,
+    task: _BlockTask,
+    origin: int,
+    origin_failure: str | None,
+) -> dict[str, Any]:
+    """Score one ``(origin, horizon)``, or explain why it could not be."""
+    if origin_failure is not None:
+        return _failure_scores(task.levels, origin_failure)
+    assert fitted is not None  # an origin without a model always carries a failure
+    try:
+        dist = fitted.predict(horizon)
+    except Exception as exc:
+        reason = _exception_reason("predict_error", exc)
+        _log_failure(task.model_name, task.asset, origin, reason, exc)
+        return _failure_scores(task.levels, reason)
+    try:
+        return _score(dist, realized_return, proxy_var, task.levels)
+    except Exception as exc:
+        reason = _exception_reason("score_error", exc)
+        _log_failure(task.model_name, task.asset, origin, reason, exc)
+        return _failure_scores(task.levels, reason)
+
+
 def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
-    """Fit once, then forecast and score every origin in the block."""
+    """Fit once, then forecast and score every origin in the block.
+
+    Faults are isolated per origin (M1 report §4.5). An exception from
+    ``fit``, ``update``, ``predict`` or scoring becomes the NaN-plus-
+    ``missing_reason`` row the results contract already promises for
+    unscorable data, instead of taking the whole cell down with it; the
+    reason keeps the exception's type and message.
+
+    A failed *scheduled* fit leaves its whole block without a model, so every
+    origin in the block gets a failure row naming the origin whose fit failed.
+    The alternative — refitting off-schedule at the next origin — would
+    silently change the refit cadence that the config hash describes. A
+    failed ``update`` costs only its own origin: later origins re-condition
+    from the last good state on their own full window.
+
+    Rows without a fitted model carry ``fit_origin = conditioned_through =
+    -1``: there is no fit to point at, and those columns are pinned int64.
+
+    Only :class:`Exception` is caught. ``KeyboardInterrupt``, ``SystemExit``
+    and friends propagate — a user ending a run is not a bad origin.
+    """
     model = task.model_factory()
     fitted: FittedModel | None = None
     fit_origin = -1
+    conditioned_through = -1
+    block_failure: str | None = None  # set while the block's scheduled fit is missing
     rows: list[dict[str, Any]] = []
 
     for origin in task.origins:
-        if fitted is None or origin.refit:
-            fitted = model.fit(task.fit_series[origin.train])
-            fit_origin = origin.origin
-            conditioned_through = origin.origin
+        origin_failure: str | None
+        if origin.refit or (fitted is None and block_failure is None):
+            try:
+                fitted = model.fit(task.fit_series[origin.train])
+            except Exception as exc:
+                fitted = None
+                fit_origin = conditioned_through = -1
+                block_failure = _exception_reason("fit_error", exc, origin=origin.origin)
+                _log_failure(task.model_name, task.asset, origin.origin, block_failure, exc)
+            else:
+                block_failure = None
+                fit_origin = conditioned_through = origin.origin
+            origin_failure = block_failure
+        elif block_failure is not None:
+            # The block's scheduled fit failed: nothing to hold or update, and
+            # no off-schedule refit (see the docstring).
+            origin_failure = block_failure
         elif isinstance(fitted, SupportsUpdate):
-            fitted = fitted.update(task.fit_series[origin.train])
-            conditioned_through = origin.origin
+            try:
+                fitted = fitted.update(task.fit_series[origin.train])
+            except Exception as exc:
+                origin_failure = _exception_reason("update_error", exc, origin=origin.origin)
+                _log_failure(task.model_name, task.asset, origin.origin, origin_failure, exc)
+            else:
+                conditioned_through = origin.origin
+                origin_failure = None
         else:
             # No update capability: the forecast still rests on the last
             # refit's information set, which is what gets recorded.
             conditioned_through = fit_origin
+            origin_failure = None
 
         for horizon, target_index in enumerate(origin.test, start=1):
             target = int(target_index)
-            dist = fitted.predict(horizon)
             row: dict[str, Any] = {
                 "config_hash": task.config_hash,
                 "asset": task.asset,
@@ -355,11 +482,14 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
                 "proxy_var": float(task.proxy[target]),
             }
             row.update(
-                _score(
-                    dist,
+                _forecast_and_score(
+                    fitted,
+                    horizon,
                     row["realized_return"],
                     row["proxy_var"],
-                    task.levels,
+                    task,
+                    origin.origin,
+                    origin_failure,
                 )
             )
             rows.append(row)
@@ -541,6 +671,16 @@ def run_backtest(
     of refit origins. Models implementing :class:`SupportsUpdate` re-condition
     (without re-estimating) at the origins in between; the rest hold their
     forecast, and ``conditioned_through`` records which happened.
+
+    Exceptions are isolated per origin. A ``fit``, ``update``, ``predict`` or
+    scoring exception produces a row with NaN scores and a ``missing_reason``
+    of the form ``<stage>[@origin]: <ExceptionType>: <message>`` — for
+    example ``fit_error@499: ValueError: realized-variance series must be
+    finite and strictly positive`` — rather than aborting the cell. A failed
+    scheduled fit fails every origin in its block (the cadence is never
+    changed to work around it); a failed update fails its own origin only.
+    Such rows carry ``fit_origin = conditioned_through = -1``. Each failure is
+    also logged at WARNING on this module's logger.
     """
     levels_tuple = tuple(float(level) for level in levels)
     if not levels_tuple:
