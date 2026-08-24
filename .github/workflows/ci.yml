@@ -2,7 +2,10 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    # feat/** is included on purpose: the Phase-2 streams found that a
+    # branch's "CI green" gate was otherwise only ever replicated locally,
+    # because this project merges feat/* branches without pull requests.
+    branches: [main, "feat/**", "m2/**"]
   pull_request:
 
 jobs:
@@ -17,7 +20,14 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv sync --dev --extra classical
-      - run: uv run --extra classical ruff check .
-      - run: uv run --extra classical mypy
-      - run: uv run --extra classical pytest
+      # classical: statsforecast + lightgbm, so models/sf.py and models/lgbm.py
+      # are actually tested rather than importorskip'd.
+      # torch-cpu: the CPU build of the pinned torch, so the PatchTST baseline's
+      # 2-epoch smoke test runs here. The tsfm-marked and gpu-marked tests stay
+      # skipped (tests/conftest.py never honours their opt-ins under CI), and
+      # the `tsfm` extra (CUDA torch, foundation-model weights) is never
+      # installed in CI.
+      - run: uv sync --dev --extra classical --extra torch-cpu
+      - run: uv run --extra classical --extra torch-cpu ruff check .
+      - run: uv run --extra classical --extra torch-cpu mypy
+      - run: uv run --extra classical --extra torch-cpu pytest
