@@ -27,6 +27,13 @@ __all__ = ["FittedNaiveVol", "NaiveVol"]
 _MIN_SIGMA = 1e-12
 
 
+def _trailing_rms(train: NDArray[np.float64]) -> float:
+    arr = np.asarray(train, dtype=np.float64)
+    if arr.ndim != 1 or arr.size < 2:
+        raise ValueError("train must be a 1-D array with at least 2 returns")
+    return max(float(np.sqrt(np.mean(arr * arr))), _MIN_SIGMA)
+
+
 @dataclass(frozen=True)
 class FittedNaiveVol:
     sigma: float
@@ -43,6 +50,18 @@ class FittedNaiveVol:
             raise ValueError("h must be >= 1")
         return Normal(mu=0.0, sigma=self.sigma)
 
+    def update(self, train: NDArray[np.float64]) -> FittedNaiveVol:
+        """Slide the window: sigma becomes the trailing RMS of ``train``.
+
+        This baseline has no estimated parameters to hold fixed — it *is* its
+        window statistic — so re-conditioning is the same computation as
+        fitting and the refit schedule cannot change its numbers. It still
+        implements ``update`` so that under ``recondition="daily"`` the naive
+        forecast tracks the latest returns like every other baseline instead
+        of being frozen between refits (docs/M1_REPORT.md §4.3).
+        """
+        return FittedNaiveVol(sigma=_trailing_rms(train))
+
 
 @dataclass(frozen=True)
 class NaiveVol:
@@ -56,8 +75,4 @@ class NaiveVol:
         return {"model": self.name}
 
     def fit(self, train: NDArray[np.float64], **ctx: Any) -> FittedNaiveVol:
-        arr = np.asarray(train, dtype=np.float64)
-        if arr.ndim != 1 or arr.size < 2:
-            raise ValueError("train must be a 1-D array with at least 2 returns")
-        sigma = max(float(np.sqrt(np.mean(arr * arr))), _MIN_SIGMA)
-        return FittedNaiveVol(sigma=sigma)
+        return FittedNaiveVol(sigma=_trailing_rms(train))

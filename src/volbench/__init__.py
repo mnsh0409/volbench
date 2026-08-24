@@ -31,6 +31,7 @@ from volbench.dist import Distribution, Empirical, Normal, QuantileGrid, Student
 from volbench.evaluate import (
     DEFAULT_LEVELS,
     ModelFactory,
+    Recondition,
     SupportsUpdate,
     forecast_moments,
     run_backtest,
@@ -86,6 +87,7 @@ __all__ = [
     "Normal",
     "Origin",
     "QuantileGrid",
+    "Recondition",
     "ResultsStore",
     "RollingOriginSplitter",
     "SerialExecutor",

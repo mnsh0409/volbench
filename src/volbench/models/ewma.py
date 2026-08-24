@@ -32,6 +32,17 @@ __all__ = ["EWMA", "FittedEWMA"]
 _MIN_VARIANCE = 1e-24
 
 
+def _ewma_variance(train: NDArray[np.float64], lambda_: float) -> float:
+    """Run the RiskMetrics recursion over ``train``; the last value is the forecast."""
+    arr = np.asarray(train, dtype=np.float64)
+    if arr.ndim != 1 or arr.size < 2:
+        raise ValueError("train must be a 1-D array with at least 2 returns")
+    var = float(arr[0] * arr[0])
+    for r in arr[1:]:
+        var = lambda_ * var + (1.0 - lambda_) * float(r * r)
+    return max(var, _MIN_VARIANCE)
+
+
 @dataclass(frozen=True)
 class FittedEWMA:
     sigma2: float
@@ -48,6 +59,16 @@ class FittedEWMA:
         if h < 1:
             raise ValueError("h must be >= 1")
         return Normal(mu=0.0, sigma=math.sqrt(self.sigma2))
+
+    def update(self, train: NDArray[np.float64]) -> FittedEWMA:
+        """Re-run the recursion over ``train`` at the same ``lambda``.
+
+        ``lambda`` is a fixed hyperparameter, never estimated, so this
+        re-conditions without estimating anything. The recursion is seeded
+        from the window's first squared return exactly as in ``fit``, so
+        ``update`` on the fit window reproduces the fit bit for bit.
+        """
+        return FittedEWMA(sigma2=_ewma_variance(train, self.lambda_), lambda_=self.lambda_)
 
 
 @dataclass(frozen=True)
@@ -68,10 +89,4 @@ class EWMA:
         return {"model": self.name, "lambda": self.lambda_}
 
     def fit(self, train: NDArray[np.float64], **ctx: Any) -> FittedEWMA:
-        arr = np.asarray(train, dtype=np.float64)
-        if arr.ndim != 1 or arr.size < 2:
-            raise ValueError("train must be a 1-D array with at least 2 returns")
-        var = float(arr[0] * arr[0])
-        for r in arr[1:]:
-            var = self.lambda_ * var + (1.0 - self.lambda_) * float(r * r)
-        return FittedEWMA(sigma2=max(var, _MIN_VARIANCE), lambda_=self.lambda_)
+        return FittedEWMA(sigma2=_ewma_variance(train, self.lambda_), lambda_=self.lambda_)

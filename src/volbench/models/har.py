@@ -55,6 +55,17 @@ _MIN_ROWS = 5
 _MIN_TRAIN = _M_WINDOW + _MIN_ROWS
 
 
+def _validated_rv(train: NDArray[np.float64], minimum: int) -> NDArray[np.float64]:
+    rv = np.asarray(train, dtype=np.float64)
+    if rv.ndim != 1 or rv.size < minimum:
+        raise ValueError(
+            f"train must be a 1-D realized-variance series with at least {minimum} observations"
+        )
+    if not np.isfinite(rv).all() or (rv <= 0.0).any():
+        raise ValueError("realized-variance series must be finite and strictly positive")
+    return rv
+
+
 def _har_features(rv: NDArray[np.float64], t: int) -> tuple[float, float, float]:
     """RV_d, RV_w, RV_m at time t, using only rv[0..t] (strict, full windows)."""
     d = float(rv[t])
@@ -114,6 +125,18 @@ class FittedHAR:
             buf = np.append(buf[1:], rv_hat)
         return Normal(mu=0.0, sigma=math.sqrt(rv_hat))
 
+    def update(self, train: NDArray[np.float64]) -> FittedHAR:
+        """Refresh the trailing RV lags under the fitted coefficients.
+
+        ``beta`` and ``resid_var`` stay exactly as estimated at the last
+        scheduled refit; only the buffer of the last 22 realized variances —
+        the regressors of the next forecast — moves to the end of ``train``.
+        Same validation as ``fit``: a non-positive or non-finite RV raises,
+        which the evaluator records as an ``update_error`` row.
+        """
+        rv = _validated_rv(train, minimum=_M_WINDOW)
+        return FittedHAR(beta=self.beta, resid_var=self.resid_var, buffer=rv[-_M_WINDOW:].copy())
+
 
 @dataclass(frozen=True)
 class HAR:
@@ -132,15 +155,7 @@ class HAR:
         }
 
     def fit(self, train: NDArray[np.float64], **ctx: Any) -> FittedHAR:
-        rv = np.asarray(train, dtype=np.float64)
-        if rv.ndim != 1 or rv.size < _MIN_TRAIN:
-            raise ValueError(
-                f"train must be a 1-D realized-variance series with at least "
-                f"{_MIN_TRAIN} observations"
-            )
-        if not np.isfinite(rv).all() or (rv <= 0.0).any():
-            raise ValueError("realized-variance series must be finite and strictly positive")
-
+        rv = _validated_rv(train, minimum=_MIN_TRAIN)
         x, y = _design_matrix(rv)
         beta = np.linalg.lstsq(x, y, rcond=None)[0].astype(np.float64)
         resid = y - x @ beta

@@ -172,6 +172,7 @@ def build_config(
     seed: int,
     scoring: Mapping[str, Any] | None = None,
     version: str | None = None,
+    protocol: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the config dict that :func:`config_hash` consumes.
 
@@ -179,8 +180,14 @@ def build_config(
     on purpose: it is the only sanctioned source of train/test indices
     (CLAUDE.md rule 1), so a hand-rolled splitter cannot even be described
     here, let alone cached.
+
+    ``protocol`` carries run-protocol settings beyond the splitter's own —
+    today the re-conditioning policy between refits. It is recorded only when
+    non-empty: the caller passes it exactly when it binds, so a setting that
+    cannot affect a run does not alter that run's identity, and every config
+    hashed before the key existed keeps its hash.
     """
-    return {
+    config: dict[str, Any] = {
         "model": {"name": model_name, "spec": dict(model_spec)},
         "data": dict(data_spec),
         "splitter": {"class": type(splitter).__name__, **asdict(splitter)},
@@ -188,6 +195,9 @@ def build_config(
         "seed": int(seed),
         "package_version": version if version is not None else package_version(),
     }
+    if protocol:
+        config["protocol"] = dict(protocol)
+    return config
 
 
 # --------------------------------------------------------------------------

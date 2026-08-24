@@ -29,10 +29,23 @@ falls back to `EWMA(lambda_=fallback_lambda)` on the same training window
 and records `fallback=True` on the fitted object, per the HARD RULES for
 this stream: an origin must get a usable forecast, never a raised
 exception that drops it from the grid.
+
+Re-conditioning between refits (docs/M1_REPORT.md §4.3): `update(train)`
+re-filters the conditional variance over the current window at the
+parameters estimated at the last scheduled refit, through `arch`'s
+`ARCHModel.fix` — the same specification rebuilt on the new window and
+evaluated at fixed parameters, with no optimizer involved. The window is
+pre-multiplied by the fit's `scale` and the fixed model is built with
+`rescale=False`, so the parameters keep the units they were estimated in
+and `predict` undoes the scale exactly as before. On the fit's own window
+`fix` reproduces the fitted forecast and every in-sample conditional
+variance to the bit, which is also the proof that the scale handling is
+right (tests/test_models_update.py).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import math
 from dataclasses import dataclass
@@ -40,7 +53,7 @@ from typing import Any, Literal
 
 import numpy as np
 from arch import arch_model
-from arch.univariate.base import ARCHModelResult
+from arch.univariate.base import ARCHModelFixedResult, ARCHModelResult
 from numpy.typing import NDArray
 
 from volbench.dist import Distribution, Normal, StudentT
@@ -62,7 +75,10 @@ class FittedGARCH:
     dist: _Dist
     fallback_lambda: float
     fallback: bool
-    result: ARCHModelResult | None
+    #: The scheduled fit (an ``ARCHModelResult``) or, after ``update``, the
+    #: same parameters fixed on a newer window (an ``ARCHModelFixedResult``,
+    #: which the fitted result subclasses). ``None`` on a fallback fit.
+    result: ARCHModelFixedResult | None
     scale: float
     fallback_fit: FittedEWMA | None
 
@@ -90,6 +106,34 @@ class FittedGARCH:
             return Normal(mu=0.0, sigma=math.sqrt(sigma2))
         nu = float(self.result.params["nu"])
         return StudentT.from_variance(0.0, sigma2, nu)
+
+    def update(self, train: NDArray[np.float64]) -> FittedGARCH:
+        """Re-filter the conditional variance over ``train`` at fixed parameters.
+
+        Nothing is re-estimated: the parameters (including ``nu``) and the
+        ``scale`` are those of the last scheduled fit; only the variance path
+        — and therefore the forecast — is re-conditioned on the new window.
+        A fallback fit re-conditions its EWMA instead. See the module
+        docstring for the ``rescale`` handling.
+        """
+        arr = np.asarray(train, dtype=np.float64)
+        if arr.ndim != 1 or arr.size < _MIN_TRAIN:
+            raise ValueError(f"train must be a 1-D array with at least {_MIN_TRAIN} returns")
+        if self.fallback:
+            assert self.fallback_fit is not None
+            return dataclasses.replace(self, fallback_fit=self.fallback_fit.update(arr))
+        assert self.result is not None
+        fixed = arch_model(
+            arr * self.scale,
+            mean="Zero",
+            vol="GARCH",
+            p=1,
+            o=self.o,
+            q=1,
+            dist=self.dist,
+            rescale=False,
+        ).fix(self.result.params)
+        return dataclasses.replace(self, result=fixed)
 
 
 @dataclass(frozen=True)

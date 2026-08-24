@@ -38,7 +38,7 @@ import pandas as pd
 
 from volbench.benchmarks.make_toy_asset import DEFAULT_PATH
 from volbench.data import load_ohlc_csv, log_returns, parkinson
-from volbench.evaluate import DEFAULT_LEVELS, ModelFactory, run_backtest
+from volbench.evaluate import DEFAULT_LEVELS, ModelFactory, Recondition, run_backtest
 from volbench.models import EWMA, GARCH, HAR, NaiveVol
 from volbench.results import ResultsStore
 from volbench.splitter import RollingOriginSplitter
@@ -134,6 +134,7 @@ def run_toy_benchmark(
     refit_every: int = 1,
     levels: Sequence[float] = DEFAULT_LEVELS,
     use_store: bool = True,
+    recondition: Recondition = "daily",
 ) -> ToyBenchmarkResult:
     """Run every baseline over the toy series and return the scored tables.
 
@@ -143,12 +144,16 @@ def run_toy_benchmark(
         Where the :class:`~volbench.results.ResultsStore` fragments and the
         summary CSV land. ``None`` runs entirely in memory.
     refit_every:
-        Origins between refits. Defaults to 1 — every origin refits — which is
-        the only honest setting today: no Phase 1 model implements
-        ``SupportsUpdate``, so at ``refit_every > 1`` each model holds a stale
-        forecast between refits instead of re-conditioning on the returns that
-        have since arrived (docs/M1_REPORT.md risk 1). The ``conditioned_
-        through`` column records that whenever it happens.
+        Origins between scheduled re-estimations. The toy runs at 1 — every
+        origin refits — because that is the M1 protocol its byte-identity gate
+        pins. Above 1, ``recondition`` decides what happens in between.
+    recondition:
+        ``"daily"`` (default): parameters from the last scheduled refit, the
+        model's conditional state re-filtered on each origin's window — the
+        reading of "refit every N days" fixed after M1 report §4.3.
+        ``"none"``: the forecast is frozen between refits — the pre-M2
+        behaviour, kept as an explicit ablation arm. The ``conditioned_
+        through`` column records which happened on every row.
     """
     returns, proxy = load_series(fixture)
     splitter = RollingOriginSplitter(
@@ -171,6 +176,7 @@ def run_toy_benchmark(
             fit_series=proxy if entry.fits_on_variance else None,
             levels=levels,
             store=store,
+            recondition=recondition,
         )
         # `model` comes from the model's own `name`; `label` is the benchmark's
         # short handle for it. Keeping both means the table stays readable
@@ -254,10 +260,15 @@ def main() -> None:
     parser.add_argument("--fixture", type=Path, default=DEFAULT_PATH)
     parser.add_argument("--seed", type=int, default=SEED)
     parser.add_argument("--refit-every", type=int, default=1)
+    parser.add_argument("--recondition", choices=("daily", "none"), default="daily")
     args = parser.parse_args()
 
     result = run_toy_benchmark(
-        out_dir=args.out_dir, fixture=args.fixture, seed=args.seed, refit_every=args.refit_every
+        out_dir=args.out_dir,
+        fixture=args.fixture,
+        seed=args.seed,
+        refit_every=args.refit_every,
+        recondition=args.recondition,
     )
     print(f"origins: {result.n_origins}   rows: {len(result.results)}")
     print(result.summary.to_string(index=False))

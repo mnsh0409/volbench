@@ -137,6 +137,39 @@
   than a schedule object. Only rolling (fixed-length) windows exist; expanding
   windows are not implemented.
 
+### Refit protocol — what "refit every N days" means
+
+Settled after M1 report §4.3 (open at M1, implemented on
+`m2/evaluator-hardening`):
+
+- **Re-estimate every `refit_every` origins.** `fit` runs only at origins the
+  splitter marks `refit=True`; the number of `fit` calls equals the number of
+  refit origins, and `fit_origin` records on every row which one served it.
+- **Re-condition daily in between** (`recondition="daily"`, the default). At
+  every other origin the backtest calls `FittedModel.update(train)` with that
+  origin's own splitter window — observations dated ≤ the origin, the exact
+  array `fit` would have been handed — and the model re-filters its
+  conditional state at the parameters of the last scheduled fit. `update`
+  never re-estimates: GARCH/GJR re-filter through `arch`'s `ARCHModel.fix`
+  (no optimizer runs; the fit's `scale` is reapplied so the parameters keep
+  their units); EWMA re-runs its recursion (λ is a fixed hyperparameter); HAR
+  refreshes its 22 trailing RV lags under the fitted coefficients; naive
+  slides its window. `conditioned_through` records the origin on every row.
+- **Frozen** (`recondition="none"`): the forecast issued at the refit origin
+  is held until the next refit — exactly what every baseline did before
+  `update` existed — kept as an explicit ablation arm, not a default anyone
+  can fall into. `conditioned_through == fit_origin` on every row.
+- **Identity.** `recondition` enters the config hash (under `protocol`)
+  whenever it can change a number, i.e. whenever `refit_every > 1`. At
+  `refit_every == 1` every origin refits, `update` is unreachable, and the two
+  settings are the same experiment, so nothing is recorded and every hash
+  computed before the key existed — the toy benchmark's included — is
+  unchanged.
+- **Invariant.** `update` on the fit window reproduces the fit exactly, for
+  every model: re-conditioning is a no-op precisely when nothing new has been
+  observed. That is what makes (b) above hold (`tests/test_model_interface.py`,
+  `tests/test_models_update.py`, `tests/test_recondition.py`).
+
 ### Evaluation — `volbench.evaluate`, `volbench.results`, `volbench.execute`
 
 - **`run_backtest(model_factory, series, proxy, splitter, seed, *, asset,
@@ -171,9 +204,10 @@
 
   **Added beyond the plan:** `SupportsUpdate`, an optional Protocol letting a
   model re-condition on newer data between scheduled refits without
-  re-estimating. **No Phase 1 model implements it**, so at `refit_every > 1`
-  every baseline currently holds a stale forecast between refits, recorded per
-  row in `conditioned_through`. See `docs/M1_REPORT.md` risk 1.
+  re-estimating. At M1 no model implemented it, so `refit_every > 1` froze
+  every forecast between refits (M1 report §4.3, risk 1). Since
+  `m2/evaluator-hardening` all four baselines implement it and the backtest
+  takes `recondition="daily" | "none"` — see "Refit protocol" above.
 
   **Added beyond the plan:** `forecast_moments(dist) -> (mean, variance)`.
   Asks the object for `mean()`/`variance()` first (closed form: `Normal`,
@@ -266,9 +300,10 @@ the guard, and keeps its own index assertion as a redundant belt.
       report's floors on the old path and pins the new path below 1e-6. The
       grid's understatement is unchanged and still documented — it is now only
       reachable by objects that really are quantile grids.
-- [ ] Refit schedule API: per-model overrides, and `SupportsUpdate` on the
-      econometric models so `refit_every > 1` means "re-estimate every 21 days,
-      re-filter daily" rather than "freeze the forecast for 21 days".
+- [x] `SupportsUpdate` on the econometric models so `refit_every > 1` means
+      "re-estimate every 21 days, re-filter daily" rather than "freeze the
+      forecast for 21 days" — **resolved on `m2/evaluator-hardening`**, see
+      "Refit protocol". Still open: per-model refit-schedule overrides.
 - [ ] Multi-horizon: separate `Distribution` per h, or joint object? (`horizon`
       exists in the splitter and in result rows; only h=1 is exercised.)
 - [ ] Should a range/RV proxy feeding HAR be reconciled with the close-to-close
