@@ -33,6 +33,17 @@ dependencies = [
     "statsmodels>=0.14.6",
 ]  # QuantileGrid.crps uses np.trapezoid, added in numpy 2.0
 
+[project.optional-dependencies]
+# Phase-2 classical model backends (docs/research_design.md models 6-8).
+# Optional on purpose: `volbench.models.sf` and `volbench.models.lgbm` are the
+# only modules that import them, neither is pulled in by `volbench.models`'s
+# package root, and the evaluator never imports a backend — so the core suite
+# still runs with neither installed.
+classical = [
+    "statsforecast>=2.0.2",
+    "lightgbm>=4.6.0",
+]
+
 [project.urls]
 Repository = "https://github.com/mnsh0409/volbench"
 
@@ -45,6 +56,17 @@ dev = [
     "pytest-cov>=7.1.0",
     "pandas-stubs>=3.0.5.260730",
 ]
+
+[tool.uv]
+# statsforecast (through 2.1.1, the latest) carries a preemptive
+# `pandas<3.0.0` cap; volbench's core requires pandas>=3.0.5, so the
+# `classical` extra is unresolvable without lifting it. The cap is a
+# compatibility guess, not an observed break: `tests/test_models_sf.py::
+# TestBackendCompatibility` runs the two adapters' full statsforecast code
+# path under the installed pandas and fails loudly if the cap ever becomes
+# real. Revisit (and delete this block) when statsforecast releases with
+# pandas 3 support.
+override-dependencies = ["pandas>=3.0.5"]
 
 [build-system]
 requires = ["hatchling"]

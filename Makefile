@@ -1,16 +1,23 @@
 .PHONY: test lint type check reproduce benchmark clean-results
 
+# Every `uv run` below carries `--extra classical`. The extra is optional for
+# *users* — the core library never imports statsforecast or lightgbm — but the
+# development gate is only a gate on models/sf.py and models/lgbm.py if their
+# backends are actually importable; without it their tests `importorskip` and
+# the suite goes green having checked nothing. `.github/workflows/ci.yml`
+# passes the same flag on all three interpreter legs.
+
 TOY_FIXTURE := src/volbench/benchmarks/data/toy_asset_daily.csv
 TOY_OUT     := data/toy_benchmark
 
 test:
-	uv run pytest
+	uv run --extra classical pytest
 
 lint:
-	uv run ruff check .
+	uv run --extra classical ruff check .
 
 type:
-	uv run mypy
+	uv run --extra classical mypy
 
 check: lint type test
 
@@ -27,7 +34,7 @@ clean-results:
 # not, the benchmark's input is not reproducible and every number downstream
 # of it is unanchored, so this stops rather than carrying on.
 benchmark: clean-results
-	uv run python -m volbench.benchmarks.make_toy_asset
+	uv run --extra classical python -m volbench.benchmarks.make_toy_asset
 	@git diff --quiet -- $(TOY_FIXTURE) || { \
 	  echo ""; \
 	  echo "ERROR: regenerating $(TOY_FIXTURE) changed it."; \
@@ -36,7 +43,7 @@ benchmark: clean-results
 	  echo "    git diff -- $(TOY_FIXTURE)"; \
 	  exit 1; \
 	}
-	uv run python -m volbench.benchmarks.toy --out-dir $(TOY_OUT)
+	uv run --extra classical python -m volbench.benchmarks.toy --out-dir $(TOY_OUT)
 	@echo ""
 	@echo "reproduce: rebuilt $(TOY_OUT)/ (summary.csv, summary.md, one parquet per model)"
 
