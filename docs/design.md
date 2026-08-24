@@ -259,10 +259,12 @@ Settled after M1 report §4.3 (open at M1, implemented on
 
 **Added beyond the plan.** `benchmarks/toy.py` composes all three streams over
 a synthetic series: at M2, **5** baselines (naive, EWMA, GARCH, GARCH-t, HAR) ×
-200 rolling origins, ~5s, byte-identical across runs. Each `ModelEntry` names
-its scoring `target`: HAR is fed and scored on `overnight_plus_range_variance`
-(D-016), the return-fed models on Parkinson. The GARCH-t config exercises the
-parametric `StudentT` path (D-014) under `make reproduce`.
+200 rolling origins, ~5s, byte-identical across runs. The scoring target is a
+property of the run, never of a model: every cell scores QLIKE against
+`overnight_plus_range_variance` (D-016), with Parkinson available as a labeled
+robustness arm behind the `target` flag; HAR's *fit input* is always the
+overnight-plus-range series regardless of the flag. The GARCH-t config
+exercises the parametric `StudentT` path (D-014) under `make reproduce`.
 `benchmarks/make_toy_asset.py` generates the input as independent overnight and
 intraday components summing to a recorded `true_variance` (M2), so estimators
 can be validated against the truth. `make reproduce` rebuilds both from

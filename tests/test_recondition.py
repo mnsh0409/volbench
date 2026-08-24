@@ -35,6 +35,7 @@ from numpy.typing import NDArray
 from volbench.benchmarks.toy import (
     ASSET_ID,
     HORIZON,
+    SCORING_TARGET,
     SEED,
     STEP,
     WINDOW,
@@ -54,14 +55,15 @@ N_ORIGINS = 200
 #: The toy benchmark's experiment identities on the committed M2 fixture
 #: (refit_every=1). They may change only with a deliberate version, protocol,
 #: fixture or target change — never as a side effect of adding a setting that
-#: does not bind. Updated at M2: new fixture (independent overnight/intraday
-#: components, docs/M2_NOTES.md), the garch11_t config, and HAR's target.
+#: does not bind. Updated at the shared-target change (m2/cleanup item 1):
+#: every cell now scores against overnight_plus_range, so the four return-fed
+#: hashes moved; HAR's is unchanged — it was already that exact cell.
 PINNED_CONFIG_HASHES = {
-    "ewma": "6fc67693400287d53b526823d5f211b5dddb08051e6011d58cfe0d6f14879928",
-    "garch11": "a2d8353f0585d51f2f7f2dd310c294de3ddb49440a7edc92d56341f2695dabd2",
-    "garch11_t": "f26765e8fd4efd8a8a4e447f0521319a2de3db8c37612122ab84a4d983b14bf8",
+    "ewma": "c44ce33c7db53c68a72305ff07fa045ffde50beeb0481422e245e6a063b2b943",
+    "garch11": "0f46244e0029259f4f8975ed1c2111d3affd722aab3a9815d63911934b3d6e8f",
+    "garch11_t": "648408c5f2579f64f9c108ad4e097dc312c44806f6f9d0d41d0322b3aedf213e",
     "har": "31c4b2f897c121bc88c0105255bb17050a65d526a6e25edac2771f341bffcef4",
-    "naive": "c62be2c24ffe857c1725f98c098400342c8c57defc00e7b46a668d804e913bf9",
+    "naive": "7e3656140a2a87badd6fa4343c9e3da14f5f857aa2597bd4b250c3271e141cec",
 }
 
 
@@ -165,7 +167,7 @@ def toy_backtest(
         splitter,
         SEED,
         asset=ASSET_ID,
-        proxy_name=entry.target,
+        proxy_name=SCORING_TARGET,
         fit_series=fit_series,
         recondition=recondition,
     )
