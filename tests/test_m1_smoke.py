@@ -202,7 +202,7 @@ class TestLeakageCanary:
 
     @staticmethod
     def _run(toy: ToySeries) -> pd.DataFrame:
-        from volbench.benchmarks.toy import ASSET_ID, HORIZON, SEED, STEP
+        from volbench.benchmarks.toy import ASSET_ID, HORIZON, SCORING_TARGET, SEED, STEP
         from volbench.evaluate import run_backtest
         from volbench.splitter import RollingOriginSplitter
 
@@ -211,7 +211,7 @@ class TestLeakageCanary:
         )
         frames = []
         for entry in models():
-            returns, proxy, fit_series = toy.inputs_for(entry)
+            returns, proxy, fit_series = toy.inputs_for(entry)  # default scoring target
             frames.append(
                 run_backtest(
                     entry.factory,
@@ -220,7 +220,7 @@ class TestLeakageCanary:
                     splitter,
                     SEED,
                     asset=ASSET_ID,
-                    proxy_name=entry.target,
+                    proxy_name=SCORING_TARGET,
                     fit_series=fit_series,
                 ).assign(label=entry.label)
             )

@@ -60,34 +60,40 @@ HORIZON = 1
 STEP = 1
 SEED = 20260823
 ASSET_ID = "TOY"
-#: Variance target for the return-fed models (naive, EWMA, GARCH): unchanged
-#: since M1, so their numbers stay comparable across the M2 change below.
-PROXY_NAME = "parkinson"
-#: Variance target for range-fed models (HAR): the per-day overnight-plus-
-#: Rogers-Satchell estimator of the *close-to-close* variance, which is the
-#: quantity HAR's forecast is scored on (M1 report §4.4; docs/M2_NOTES.md).
-HAR_TARGET = "overnight_plus_range"
+#: The benchmark's scoring target — a property of the evaluation cell, never
+#: of the model (M2 review; supersedes the short-lived per-model wiring).
+#: Every model's QLIKE is scored against the per-day overnight-plus-Rogers-
+#: Satchell estimator of the *close-to-close* variance, because every model's
+#: forecast IS a close-to-close variance (M1 report §4.4; docs/M2_NOTES.md).
+SCORING_TARGET = "overnight_plus_range"
+#: The labeled robustness target: intraday-only Parkinson, kept behind the
+#: ``target`` flag so proxy-robustness of the *rankings* can be checked
+#: (Patton 2011) without ever becoming a silent default. Forecasts do not
+#: depend on the proxy, so switching it moves QLIKE columns only.
+ROBUSTNESS_TARGET = "parkinson"
 
 
 @dataclass(frozen=True)
 class ModelEntry:
-    """One model in the benchmark: what it fits on, and what its variance is scored against.
+    """One model in the benchmark, and which series it fits on.
 
     ``fits_on_variance`` is the whole reason this dataclass exists rather than
     a bare list of factories: HAR-RV takes a realized-variance series where
     every other baseline takes returns (models/har.py). ``run_backtest``
     supports that through ``fit_series``, and getting the flag wrong would
-    quietly feed a model the wrong units rather than raise.
+    quietly feed a model the wrong units rather than raise. A variance-fed
+    model's input is always the close-to-close estimator (``SCORING_TARGET``'s
+    series), whatever the benchmark is *scored* against: the input defines
+    what the model forecasts, and that never changes with the evaluation.
 
-    ``target`` names the variance series the model is scored against on
-    QLIKE — and, for a range-fed model, also fed as its input, so what it
-    forecasts and what it is scored on are the same quantity.
+    There is deliberately no per-model scoring target here: the target is a
+    property of the evaluation cell, not of the model, or the models' QLIKE
+    columns stop being comparable.
     """
 
     label: str
     factory: ModelFactory
     fits_on_variance: bool = False
-    target: str = PROXY_NAME
 
 
 def models() -> list[ModelEntry]:
@@ -95,8 +101,8 @@ def models() -> list[ModelEntry]:
 
     The Student-t config was added at M2 so that `make reproduce` exercises
     the parametric ``StudentT`` path that closed M1 report §4.2 (D-014), not
-    only the unit tests. HAR is fed and scored on the overnight-plus-range
-    target (§4.4, D-016); the return-fed models keep Parkinson.
+    only the unit tests. HAR is fed the overnight-plus-range series (§4.4,
+    D-016); every model is scored against the one benchmark-level target.
 
     Factories are module-level classes or ``functools.partial`` over them, so
     they stay picklable for the Phase 2 process/Slurm executors — a lambda
@@ -108,7 +114,7 @@ def models() -> list[ModelEntry]:
         ModelEntry("ewma", functools.partial(EWMA, lambda_=0.94)),
         ModelEntry("garch11", functools.partial(GARCH, o=0, dist="normal")),
         ModelEntry("garch11_t", functools.partial(GARCH, o=0, dist="studentst")),
-        ModelEntry("har", HAR, fits_on_variance=True, target=HAR_TARGET),
+        ModelEntry("har", HAR, fits_on_variance=True),
     ]
 
 
@@ -132,10 +138,20 @@ class ToySeries:
     returns: pd.Series
     targets: dict[str, pd.Series]
 
-    def inputs_for(self, entry: ModelEntry) -> tuple[pd.Series, pd.Series, pd.Series | None]:
-        """``(series, proxy, fit_series)`` for ``run_backtest``, per the entry's contract."""
-        proxy = self.targets[entry.target]
-        return self.returns, proxy, (proxy if entry.fits_on_variance else None)
+    def inputs_for(
+        self, entry: ModelEntry, target: str = SCORING_TARGET
+    ) -> tuple[pd.Series, pd.Series, pd.Series | None]:
+        """``(series, proxy, fit_series)`` for ``run_backtest``.
+
+        ``target`` picks the scoring proxy for the whole cell. The fit input
+        of a variance-fed model is always the close-to-close estimator — what
+        the model forecasts is a modelling contract, not an evaluation knob.
+        """
+        if target not in self.targets:
+            raise KeyError(f"unknown target {target!r}; have {sorted(self.targets)}")
+        proxy = self.targets[target]
+        fit_series = self.targets[SCORING_TARGET] if entry.fits_on_variance else None
+        return self.returns, proxy, fit_series
 
 
 def load_series(path: Path = DEFAULT_PATH) -> ToySeries:
@@ -152,8 +168,10 @@ def load_series(path: Path = DEFAULT_PATH) -> ToySeries:
     frame = load_ohlc_csv(path, asset_id=ASSET_ID, source="synthetic")
     return_series = log_returns(frame.close)
     targets = {
-        PROXY_NAME: parkinson(frame.high, frame.low),
-        HAR_TARGET: overnight_plus_range_variance(frame.open, frame.high, frame.low, frame.close),
+        ROBUSTNESS_TARGET: parkinson(frame.high, frame.low),
+        SCORING_TARGET: overnight_plus_range_variance(
+            frame.open, frame.high, frame.low, frame.close
+        ),
     }
     # Belt to run_backtest's braces: it re-checks the calendars on the way in,
     # but two helpers that fell out of step — one gaining a `dropna()`, say —
@@ -184,6 +202,7 @@ def run_toy_benchmark(
     levels: Sequence[float] = DEFAULT_LEVELS,
     use_store: bool = True,
     recondition: Recondition = "daily",
+    target: str = SCORING_TARGET,
 ) -> ToyBenchmarkResult:
     """Run every baseline over the toy series and return the scored tables.
 
@@ -203,6 +222,14 @@ def run_toy_benchmark(
         ``"none"``: the forecast is frozen between refits — the pre-M2
         behaviour, kept as an explicit ablation arm. The ``conditioned_
         through`` column records which happened on every row.
+    target:
+        The scoring target for every cell in the run — ``"overnight_plus_
+        range"`` (default) or the labeled robustness arm ``"parkinson"``.
+        One target per run, never per model, so the QLIKE column is
+        comparable across rows; forecasts do not depend on it (the proxy
+        never reaches a model), so switching it moves only QLIKE and the
+        proxy columns. Part of each cell's config hash via ``proxy_name``
+        and the proxy's content digest.
     """
     toy = load_series(fixture)
     splitter = RollingOriginSplitter(
@@ -213,7 +240,7 @@ def run_toy_benchmark(
     frames: list[pd.DataFrame] = []
     hashes: dict[str, str] = {}
     for entry in models():
-        returns, proxy, fit_series = toy.inputs_for(entry)
+        returns, proxy, fit_series = toy.inputs_for(entry, target=target)
         frame = run_backtest(
             entry.factory,
             returns,
@@ -221,7 +248,7 @@ def run_toy_benchmark(
             splitter,
             seed,
             asset=ASSET_ID,
-            proxy_name=entry.target,
+            proxy_name=target,
             data_spec={"fixture": fixture.name, "generator": "volbench.benchmarks.make_toy_asset"},
             fit_series=fit_series,
             levels=levels,
@@ -312,6 +339,12 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=SEED)
     parser.add_argument("--refit-every", type=int, default=1)
     parser.add_argument("--recondition", choices=("daily", "none"), default="daily")
+    parser.add_argument(
+        "--target",
+        choices=(SCORING_TARGET, ROBUSTNESS_TARGET),
+        default=SCORING_TARGET,
+        help="scoring target for every cell; 'parkinson' is the labeled robustness arm",
+    )
     args = parser.parse_args()
 
     result = run_toy_benchmark(
@@ -320,6 +353,7 @@ def main() -> None:
         seed=args.seed,
         refit_every=args.refit_every,
         recondition=args.recondition,
+        target=args.target,
     )
     print(f"origins: {result.n_origins}   rows: {len(result.results)}")
     print(result.summary.to_string(index=False))

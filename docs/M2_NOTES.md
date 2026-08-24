@@ -103,7 +103,49 @@ variance — so their QLIKE remains mismatched in the same way HAR's return-base
 scores were at M1. Fixing only HAR's target, per the M2 scope, is therefore a
 *partial* correction. Scoring every model's QLIKE against the close-to-close
 proxy is the consistent end state and a decision to take deliberately, not a
-silent default — flagged for Phase 2.
+silent default — flagged for Phase 2. *(Taken: see "One scoring target per
+cell" below — the per-model wiring lasted one commit.)*
+
+## One scoring target per cell (M2 review, item 1 — supersedes the per-model wiring)
+
+Principle: **the scoring target is a property of the evaluation cell, never of
+the model.** With per-model targets, the QLIKE column compared models against
+different proxies — which is not a comparison. Now every cell in a run scores
+QLIKE against `overnight_plus_range` (all models forecast the close-to-close
+variance, so all are scored against its estimator); HAR's *fit input* stays the
+overnight-plus-range series under any setting, because what a model forecasts
+is a modelling contract, not an evaluation knob. Parkinson survives as a
+**labeled robustness arm** behind `--target parkinson` / `run_toy_benchmark(
+target=...)` — one target per run, in the config hash, never a silent default.
+
+The now-comparable table (`make reproduce`, 200 origins, refit every origin):
+
+| model | CRPS | log score | QLIKE vs OPR | hit@1% | hit@5% | QLIKE before (per-model targets) |
+|---|--:|--:|--:|--:|--:|--:|
+| ewma | 0.00582 | −3.186 | **0.162** | 0.005 | 0.040 | 0.175 (Parkinson) |
+| har | 0.00586 | −3.160 | **0.182** | 0.005 | 0.035 | 0.182 (already OPR) |
+| garch11_t | 0.00587 | −3.160 | **0.173** | 0.005 | 0.035 | 0.215 (Parkinson) |
+| garch11 | 0.00587 | −3.160 | **0.173** | 0.005 | 0.035 | 0.215 (Parkinson) |
+| naive | 0.00601 | −3.078 | **0.303** | 0.010 | 0.030 | 0.365 (Parkinson) |
+
+**The return-fed models' QLIKE levels shifted because the target changed, not
+the models.** Their forecasts are untouched: CRPS, log score, pinball and hit
+columns are byte-identical between the two wirings (the proxy never reaches a
+model — pinned in `tests/test_toy_targets.py`), and only the QLIKE and proxy
+columns moved. HAR's cell is literally the same experiment as before (same
+config hash). With one target the QLIKE ranking is now meaningful: EWMA and
+the GARCHes score better against the close-to-close proxy than against the
+intraday one they were previously mismatched with, and naive remains worst.
+
+## Version 0.2.0 — every config hash changed at this boundary, intentionally
+
+`package_version` is part of every config hash. The M2 behaviour changes
+(StudentT forecasts, refit semantics, the shared close-to-close target)
+changed what a given config *computes*, but under 0.1.0 its hash — and so any
+`ResultsStore` entry made by the old code — stayed servable. The bump to
+0.2.0 closes that stale-hash hazard (flagged at the StudentT commit): every
+hash moves, all pre-0.2.0 fragments are orphaned (never overwritten, never
+served), and `make reproduce`'s pinned identities were regenerated once, here.
 
 ## Reproduce
 

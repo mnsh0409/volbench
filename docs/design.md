@@ -259,10 +259,12 @@ Settled after M1 report §4.3 (open at M1, implemented on
 
 **Added beyond the plan.** `benchmarks/toy.py` composes all three streams over
 a synthetic series: at M2, **5** baselines (naive, EWMA, GARCH, GARCH-t, HAR) ×
-200 rolling origins, ~5s, byte-identical across runs. Each `ModelEntry` names
-its scoring `target`: HAR is fed and scored on `overnight_plus_range_variance`
-(D-016), the return-fed models on Parkinson. The GARCH-t config exercises the
-parametric `StudentT` path (D-014) under `make reproduce`.
+200 rolling origins, ~5s, byte-identical across runs. The scoring target is a
+property of the run, never of a model: every cell scores QLIKE against
+`overnight_plus_range_variance` (D-016), with Parkinson available as a labeled
+robustness arm behind the `target` flag; HAR's *fit input* is always the
+overnight-plus-range series regardless of the flag. The GARCH-t config
+exercises the parametric `StudentT` path (D-014) under `make reproduce`.
 `benchmarks/make_toy_asset.py` generates the input as independent overnight and
 intraday components summing to a recorded `true_variance` (M2), so estimators
 can be validated against the truth. `make reproduce` rebuilds both from
@@ -304,8 +306,11 @@ the `package_version()` that enters every config hash.
 `run_backtest` aligns `series`, `proxy` and `fit_series` *positionally*, so it
 now requires them to be on one calendar. Pandas inputs must carry identical
 indexes — values and order, checked with `Index.equals`, the first mismatching
-position named in the `ValueError`; mixing an indexed input with a bare array
-is refused. Bare arrays for *every* input remain accepted as an explicit
+position named in the `ValueError` — and the index must be in ascending time
+order (`is_monotonic_increasing`; added on `m2/cleanup` to close the M2
+leakage-audit gap, since a backwards calendar would make the positional
+splitter run against time); mixing an indexed input with a bare array is
+refused. Bare arrays for *every* input remain accepted as an explicit
 positional opt-in (only lengths are checked), because they carry no calendar
 to compare. `benchmarks/toy.py` passes indexed Series so its path exercises
 the guard, and keeps its own index assertion as a redundant belt.

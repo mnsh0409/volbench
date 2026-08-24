@@ -25,7 +25,7 @@ import pytest
 from numpy.typing import NDArray
 
 from volbench.benchmarks.make_toy_asset import DEFAULT_PATH
-from volbench.benchmarks.toy import ASSET_ID, PROXY_NAME, WINDOW, build_summary
+from volbench.benchmarks.toy import ASSET_ID, WINDOW, build_summary
 from volbench.data import load_ohlc_csv, log_returns, parkinson
 from volbench.dist import Distribution, Normal
 from volbench.evaluate import run_backtest
@@ -34,6 +34,10 @@ from volbench.results import ResultsStore
 from volbench.splitter import RollingOriginSplitter
 
 SIGMA = 0.012
+
+#: This file's HAR scenario deliberately uses the intraday Parkinson series —
+#: it needs a proxy that a limit-locked day sends to exactly zero.
+PROXY_NAME = "parkinson"
 
 
 # --------------------------------------------------------------------------
