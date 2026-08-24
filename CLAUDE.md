@@ -31,7 +31,12 @@ Forecasting special section). Never violate:
 
 If a task would contradict any of those, STOP and report rather than
 working around it. Those files are mirrors of the planning folder; treat
-them as read-only here and flag drift instead of editing them.
+them as read-only here and flag drift instead of editing them — with two
+exceptions, available only when a task explicitly instructs the edit:
+appends to `docs/decisions.md` and updates to `docs/M2_NOTES.md`. Masters
+stay on the planning machine, which reconciles anything appended here
+(numbering included). Never edit the other mirrors, and never edit these
+two uninstructed.
 
 ## Conventions
 
