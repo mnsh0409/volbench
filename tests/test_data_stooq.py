@@ -107,3 +107,99 @@ class TestIngestManualCsv:
     def test_unknown_asset_rejected(self, tmp_path: Path) -> None:
         with pytest.raises(KeyError):
             download_index("NOT_A_REAL_ASSET", cache_dir=tmp_path)
+
+
+BULK_FIXTURE = Path(__file__).parent / "fixtures" / "stooq_bulk_sample.txt"
+
+
+class TestParseBulkArchiveFormat:
+    """The bulk ``d_*_txt`` archives carry the same daily bars in a second shape.
+
+    ``<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>``
+    with ``YYYYMMDD`` dates, versus the per-symbol export's
+    ``Date,Open,High,Low,Close,Volume`` with ISO dates. One parser reads both so
+    ``ingest_manual_csv`` — the only sanctioned Stooq path — serves either.
+    """
+
+    def test_parses_the_bulk_layout(self) -> None:
+        df = parse_stooq_csv(BULK_FIXTURE.read_bytes())
+        assert list(df.columns) == ["open", "high", "low", "close", "volume"]
+        assert len(df) == 5
+        assert str(df.index.tz) == "UTC"
+        assert df.index.is_monotonic_increasing
+
+    def test_yyyymmdd_dates_are_read_as_calendar_dates(self) -> None:
+        # Read as a bare integer, 20050103 would become a nanosecond epoch and
+        # the whole panel would silently land in 1970.
+        df = parse_stooq_csv(BULK_FIXTURE.read_bytes())
+        assert df.index[0] == pd.Timestamp("2005-01-03", tz="UTC")
+        assert df.index[-1] == pd.Timestamp("2005-01-07", tz="UTC")
+
+    def test_per_time_and_openint_are_dropped(self) -> None:
+        df = parse_stooq_csv(BULK_FIXTURE.read_bytes())
+        assert not {"per", "time", "openint", "ticker"} & set(df.columns)
+
+    def test_ticker_is_reported_in_attrs(self) -> None:
+        assert parse_stooq_csv(BULK_FIXTURE.read_bytes()).attrs["ticker"] == "FAKE.US"
+
+    def test_export_format_has_no_ticker(self) -> None:
+        assert parse_stooq_csv(FIXTURE.read_bytes()).attrs["ticker"] is None
+
+    def test_prices_survive_the_round_trip(self) -> None:
+        df = parse_stooq_csv(BULK_FIXTURE.read_bytes())
+        assert df["open"].iloc[0] == pytest.approx(100.0)
+        assert df["close"].iloc[-1] == pytest.approx(100.1)
+
+    def test_a_file_mixing_tickers_is_refused(self) -> None:
+        raw = (
+            b"<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>\n"
+            b"A.US,D,20050103,000000,1,2,0.5,1.5,1,0\n"
+            b"B.US,D,20050104,000000,1,2,0.5,1.5,1,0\n"
+        )
+        with pytest.raises(StooqDownloadError, match="mixes several tickers"):
+            parse_stooq_csv(raw)
+
+
+class TestIngestTickerGuard:
+    def test_matching_ticker_passes_and_is_reported(self, tmp_path: Path) -> None:
+        result = ingest_manual_csv(
+            BULK_FIXTURE,
+            asset_id="FAKE",
+            cache_dir=tmp_path,
+            expect_ticker="FAKE.US",
+            ingested_on=pd.Timestamp("2026-08-25").date(),
+        )
+        assert result.ticker == "FAKE.US"
+        assert len(result.frame) == 5
+
+    def test_ticker_match_is_case_insensitive(self, tmp_path: Path) -> None:
+        result = ingest_manual_csv(
+            BULK_FIXTURE,
+            asset_id="FAKE",
+            cache_dir=tmp_path,
+            expect_ticker="fake.us",
+            ingested_on=pd.Timestamp("2026-08-25").date(),
+        )
+        assert result.ticker == "FAKE.US"
+
+    def test_wrong_ticker_raises(self, tmp_path: Path) -> None:
+        # The bulk archives hold tens of thousands of symbols; opening the
+        # wrong one must fail loudly, not produce a plausible wrong panel.
+        with pytest.raises(StooqDownloadError, match="declares ticker"):
+            ingest_manual_csv(
+                BULK_FIXTURE,
+                asset_id="NDX",
+                cache_dir=tmp_path,
+                expect_ticker="^NDX",
+                ingested_on=pd.Timestamp("2026-08-25").date(),
+            )
+
+    def test_export_format_cannot_be_checked_and_passes(self, tmp_path: Path) -> None:
+        result = ingest_manual_csv(
+            FIXTURE,
+            asset_id="SPX",
+            cache_dir=tmp_path,
+            expect_ticker="^SPX",
+            ingested_on=pd.Timestamp("2026-08-25").date(),
+        )
+        assert result.ticker is None
