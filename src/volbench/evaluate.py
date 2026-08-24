@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Protocol, runtime_checkable
 
 import numpy as np
-import pandas as pd  # type: ignore[import-untyped]  # no stubs; pyproject is another stream's file
+import pandas as pd
 from numpy.typing import NDArray
 
 from volbench.dist import Distribution, Empirical, Normal, QuantileGrid

@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-import pandas as pd  # type: ignore[import-untyped]
+import pandas as pd
 import requests
 
 from volbench.data.types import TimeSeriesFrame

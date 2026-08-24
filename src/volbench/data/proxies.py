@@ -11,9 +11,10 @@ independent of, and does not replace, RollingOriginSplitter.
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import numpy as np
-import pandas as pd  # type: ignore[import-untyped]
+import pandas as pd
 
 __all__ = [
     "garman_klass",
@@ -25,6 +26,12 @@ __all__ = [
 
 _LN2 = math.log(2.0)
 _GK_CLOSE_COEF = 2.0 * _LN2 - 1.0
+
+
+def _log(values: pd.Series) -> pd.Series:
+    """``np.log`` of a Series *is* a Series (pandas implements ``__array_ufunc__``);
+    numpy's stubs only know it as an ndarray. Same call, correct type."""
+    return cast(pd.Series, np.log(values))
 
 
 def log_returns(close: pd.Series) -> pd.Series:
@@ -44,7 +51,7 @@ def log_returns(close: pd.Series) -> pd.Series:
     series by one would offset every forecast against the wrong realization.
     """
     c = close.astype(np.float64)
-    out: pd.Series = (np.log(c) - np.log(c.shift(1))).rename("log_return")
+    out: pd.Series = (_log(c) - _log(c.shift(1))).rename("log_return")
     return out
 
 
@@ -70,7 +77,7 @@ def parkinson(high: pd.Series, low: pd.Series) -> pd.Series:
     lo = low.astype(np.float64)
     if (h < lo).any():
         raise ValueError("high must be >= low at every observation")
-    hl = np.log(h / lo)
+    hl = _log(h / lo)
     out: pd.Series = (hl**2 / (4.0 * _LN2)).rename("parkinson")
     return out
 
@@ -94,8 +101,8 @@ def garman_klass(
     c = close.astype(np.float64)
     if (h < lo).any():
         raise ValueError("high must be >= low at every observation")
-    hl_term = np.log(h / lo) ** 2
-    co_term = np.log(c / o) ** 2
+    hl_term = _log(h / lo) ** 2
+    co_term = _log(c / o) ** 2
     out: pd.Series = (0.5 * hl_term - _GK_CLOSE_COEF * co_term).rename("garman_klass")
     return out
 

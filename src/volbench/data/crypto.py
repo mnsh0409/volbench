@@ -28,10 +28,12 @@ import json
 import zipfile
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
-import pandas as pd  # type: ignore[import-untyped]
+import pandas as pd
 import requests
+from numpy.typing import NDArray
 
 from volbench.data.proxies import realized_variance_from_bars
 
@@ -101,11 +103,11 @@ def fetch_daily_klines_zip(
     return resp.content
 
 
-def _epoch_to_utc_index(epoch: np.ndarray) -> pd.DatetimeIndex:
+def _epoch_to_utc_index(epoch: NDArray[np.int64]) -> pd.DatetimeIndex:
     # Binance klines timestamps are milliseconds by convention; some newer
     # endpoints emit microseconds. Millisecond epochs for 2005-2100 are
     # O(1e12-1e13); microsecond epochs are O(1e15-1e16) - detect by magnitude.
-    unit = "us" if epoch.size and epoch[0] > 10**14 else "ms"
+    unit: Literal["us", "ms"] = "us" if epoch.size and epoch[0] > 10**14 else "ms"
     idx: pd.DatetimeIndex = pd.to_datetime(epoch, unit=unit, utc=True)
     return idx
 

@@ -10,8 +10,9 @@ frames downstream, not to the data layer (docs/design.md §Components).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
-import pandas as pd  # type: ignore[import-untyped]
+import pandas as pd
 
 __all__ = ["CLOSE_COLUMN", "OHLC_COLUMNS", "TimeSeriesFrame"]
 
@@ -79,7 +80,7 @@ class TimeSeriesFrame:
             raise ValueError("TimeSeriesFrame.source must be non-empty")
 
         frame = self.data.copy(deep=True)
-        frame.index = frame.index.tz_convert("UTC")
+        frame.index = index.tz_convert("UTC")  # `index` was validated above as a DatetimeIndex
         frame.index.name = "timestamp"
         object.__setattr__(self, "data", frame)
 
@@ -88,8 +89,8 @@ class TimeSeriesFrame:
 
     @property
     def index(self) -> pd.DatetimeIndex:
-        idx: pd.DatetimeIndex = self.data.index
-        return idx
+        # Enforced in __post_init__; the stubs only know that an index is an Index.
+        return cast(pd.DatetimeIndex, self.data.index)
 
     @property
     def has_ohlc(self) -> bool:
