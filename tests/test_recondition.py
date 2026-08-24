@@ -55,15 +55,17 @@ N_ORIGINS = 200
 #: The toy benchmark's experiment identities on the committed M2 fixture
 #: (refit_every=1). They may change only with a deliberate version, protocol,
 #: fixture or target change — never as a side effect of adding a setting that
-#: does not bind. Updated at the shared-target change (m2/cleanup item 1):
+#: does not bind. Updated at the 0.2.0 version bump (m2/cleanup item 3 —
+#: package_version is in every hash, so all five moved) after the
+#: shared-target change (item 1):
 #: every cell now scores against overnight_plus_range, so the four return-fed
 #: hashes moved; HAR's is unchanged — it was already that exact cell.
 PINNED_CONFIG_HASHES = {
-    "ewma": "c44ce33c7db53c68a72305ff07fa045ffde50beeb0481422e245e6a063b2b943",
-    "garch11": "0f46244e0029259f4f8975ed1c2111d3affd722aab3a9815d63911934b3d6e8f",
-    "garch11_t": "648408c5f2579f64f9c108ad4e097dc312c44806f6f9d0d41d0322b3aedf213e",
-    "har": "31c4b2f897c121bc88c0105255bb17050a65d526a6e25edac2771f341bffcef4",
-    "naive": "7e3656140a2a87badd6fa4343c9e3da14f5f857aa2597bd4b250c3271e141cec",
+    "ewma": "a8b5c09920c71e50e5db6278e42a1f72d794cbd56adff8ac8d72e38d7724557e",
+    "garch11": "df8331ca16bffad6f02e149371258916a808c93bb0646b8a81a7021e83d72fdf",
+    "garch11_t": "2dc2b92736e9a757be178c826243d57143dd64c490cacbca0f81b2be3ef3cc3e",
+    "har": "1adf71499d65d74342b96e886708f7d3b626080ca395aa7fbcd4eef3091e0092",
+    "naive": "628a3eb5344efb81a4cfe4d10ce9c8152e2f338e486950cdbcd300f213968a5a",
 }
 
 

@@ -137,6 +137,16 @@ config hash). With one target the QLIKE ranking is now meaningful: EWMA and
 the GARCHes score better against the close-to-close proxy than against the
 intraday one they were previously mismatched with, and naive remains worst.
 
+## Version 0.2.0 — every config hash changed at this boundary, intentionally
+
+`package_version` is part of every config hash. The M2 behaviour changes
+(StudentT forecasts, refit semantics, the shared close-to-close target)
+changed what a given config *computes*, but under 0.1.0 its hash — and so any
+`ResultsStore` entry made by the old code — stayed servable. The bump to
+0.2.0 closes that stale-hash hazard (flagged at the StudentT commit): every
+hash moves, all pre-0.2.0 fragments are orphaned (never overwritten, never
+served), and `make reproduce`'s pinned identities were regenerated once, here.
+
 ## Reproduce
 
 `make reproduce` rebuilds the fixture and the benchmark from scratch and is
