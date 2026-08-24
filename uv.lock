@@ -2,32 +2,55 @@ version = 1
 revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.15' and sys_platform == 'linux'",
-    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'linux'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'linux'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'emscripten'",
-    "python_full_version < '3.12' and sys_platform == 'linux'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'linux' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'linux' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "(python_full_version >= '3.13' and python_full_version < '3.15' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version >= '3.12' and python_full_version < '3.15' and platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version >= '3.12' and python_full_version < '3.15' and platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "(python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version == '3.12.*' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "(python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version < '3.12' and platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "(python_full_version < '3.12' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version < '3.12' and sys_platform == 'darwin' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
 ]
+conflicts = [[
+    { package = "volbench", extra = "torch-cpu" },
+    { package = "volbench", extra = "tsfm" },
+]]
 
 [manifest]
 overrides = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "pandas", specifier = ">=3.0.5" },
     { name = "scipy", specifier = ">=1.17.1" },
-    { name = "torch", marker = "sys_platform != 'linux'", specifier = "==2.5.1" },
-    { name = "torch", marker = "sys_platform == 'linux'", specifier = "==2.5.1", index = "https://download.pytorch.org/whl/cu121" },
 ]
+
+[[manifest.dependency-metadata]]
+name = "uni2ts"
+version = "2.0.0"
+requires-dist = ["torch>=2.1", "lightning>=2.0", "gluonts~=0.14.3", "numpy~=1.26.0", "scipy~=1.11.3", "einops==0.7.*", "jaxtyping~=0.2.24", "python-dotenv==1.0.0", "hydra-core==1.3", "orjson", "tensorboard", "multiprocess", "huggingface-hub>=0.23.0", "safetensors", "datasets~=2.17.1", "jax[cpu]"]
 
 [[package]]
 name = "absl-py"
@@ -44,14 +67,14 @@ version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "packaging" },
     { name = "psutil" },
     { name = "pyyaml" },
     { name = "safetensors" },
-    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "sys_platform == 'linux'" },
+    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8d/75/94cd5d389649578aca399e5aa822637eec18319a1dadc400ffe2f9a7493f/accelerate-1.14.0.tar.gz", hash = "sha256:41b9c4377a54e0b460a959b0defa1b736e4ca0a2373252d9a539964c2afe3c8d", size = 412167, upload-time = "2026-06-11T13:45:52.326Z" }
 wheels = [
@@ -240,12 +263,12 @@ name = "arch"
 version = "8.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "packaging" },
     { name = "pandas" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "statsmodels" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/61/50/f8be4b21db5eb0490aef82b592d105baac957f601805ee7fe5b9182405b2/arch-8.0.0.tar.gz", hash = "sha256:5e9895c2354b9475aff50797ff2191dc64dc5f79602baf0c9321310fb864b637", size = 872623, upload-time = "2025-10-21T08:55:52.667Z" }
@@ -521,11 +544,11 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate" },
     { name = "einops" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "pandas" },
-    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "sys_platform == 'linux'" },
+    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "transformers" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a6/71/609ff332069de0580a8a1fa357558975a91be786d612ce179c2797a00a52/chronos_forecasting-2.3.1.tar.gz", hash = "sha256:785116f3f10aaac44a315700c5e4de71a5fe6385c9c771722d688f402fe75083", size = 726426, upload-time = "2026-07-02T08:22:58.672Z" }
@@ -670,7 +693,7 @@ wheels = [
 
 [package.optional-dependencies]
 toml = [
-    { name = "tomli", marker = "python_full_version <= '3.11'" },
+    { name = "tomli", marker = "python_full_version <= '3.11' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 
 [[package]]
@@ -681,11 +704,11 @@ dependencies = [
     { name = "aiohttp" },
     { name = "dill" },
     { name = "filelock" },
-    { name = "fsspec", extra = ["http"] },
+    { name = "fsspec", extra = ["http"], marker = "extra == 'extra-8-volbench-tsfm'" },
     { name = "huggingface-hub" },
     { name = "multiprocess" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "packaging" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -861,8 +884,8 @@ name = "gluonts"
 version = "0.14.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "pandas" },
     { name = "pydantic" },
     { name = "toolz" },
@@ -1063,11 +1086,11 @@ resolution-markers = [
     "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" } },
-    { name = "ml-dtypes" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" } },
-    { name = "opt-einsum" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" } },
+    { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "ml-dtypes", marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "opt-einsum", marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d2/73/eb91d98fcadfa2cbcfdd4e417ab116e47eb20882acc5ee678e47c35d6b57/jax-0.10.2.tar.gz", hash = "sha256:bf77428a8c2e6904c4f46d5ab12aa5cfc6cad2179f07f7e4c0fc75ac86ef0639", size = 2775110, upload-time = "2026-06-17T23:44:57.818Z" }
 wheels = [
@@ -1083,21 +1106,17 @@ resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform == 'linux'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'linux'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'linux'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'linux'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "jaxlib", version = "0.11.1", source = { registry = "https://pypi.org/simple" } },
-    { name = "ml-dtypes" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" } },
-    { name = "opt-einsum" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" } },
+    { name = "jaxlib", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "ml-dtypes", marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "opt-einsum", marker = "python_full_version >= '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/90/aa/c3b6ac3863a490661e255d2356802b54d57b533460fa221d30743d81a6c1/jax-0.11.1.tar.gz", hash = "sha256:43e0d45b1dac002eca04c2de73298395225dd0d4651e3f573a540eaa18abfd80", size = 2864119, upload-time = "2026-08-17T20:31:29.938Z" }
 wheels = [
@@ -1115,9 +1134,9 @@ resolution-markers = [
     "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "ml-dtypes" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" } },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" } },
+    { name = "ml-dtypes", marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b2/2c/7038fc73154307389631b5b2dbe5ac529e1918eecc19a27e6644ad114bbf/jaxlib-0.10.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:5a98873fc867623b81f2bee15d554b8edd6588a183d01fa50d21b1e3db96ff2b", size = 61429039, upload-time = "2026-06-17T23:43:44.858Z" },
@@ -1153,19 +1172,15 @@ resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform == 'linux'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'linux'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'linux'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'linux'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "ml-dtypes" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" } },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" } },
+    { name = "ml-dtypes", marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6a/b4/9a7caf8704536e694ab8b4286eb4afa2224f3f75283f370d2246343e7bbc/jaxlib-0.11.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:384f633331c012491ccd65c38d47cd80d4131f5b3852694766bffa9385ddc9f3", size = 63173264, upload-time = "2026-08-17T20:30:07.721Z" },
@@ -1337,13 +1352,13 @@ name = "lightning"
 version = "2.6.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "fsspec", extra = ["http"] },
+    { name = "fsspec", extra = ["http"], marker = "extra == 'extra-8-volbench-tsfm'" },
     { name = "lightning-utilities" },
     { name = "packaging" },
     { name = "pytorch-lightning" },
     { name = "pyyaml" },
-    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "sys_platform == 'linux'" },
+    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "torchmetrics" },
     { name = "tqdm" },
     { name = "typing-extensions" },
@@ -1475,8 +1490,8 @@ name = "ml-dtypes"
 version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/12/72/307d7c4bd0600601c7133fba5cb78af7db968152951c1cd473abb1cda782/ml_dtypes-0.6.0.tar.gz", hash = "sha256:5e60251d32ced5598972e4d5e06a2f044341f9291402551a3f6f0ec44f9299b0", size = 3032327, upload-time = "2026-08-13T14:14:40.215Z" }
 wheels = [
@@ -1665,7 +1680,7 @@ version = "2.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ast-serialize" },
-    { name = "librt", marker = "platform_python_implementation != 'PyPy'" },
+    { name = "librt", marker = "platform_python_implementation != 'PyPy' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "mypy-extensions" },
     { name = "pathspec" },
     { name = "typing-extensions" },
@@ -1752,7 +1767,7 @@ version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-types" },
-    { name = "httpx", extra = ["zstd"] },
+    { name = "httpx", extra = ["zstd"], marker = "extra == 'extra-8-volbench-tsfm'" },
     { name = "narwhals" },
     { name = "orjson" },
     { name = "pandas" },
@@ -1780,10 +1795,17 @@ name = "numpy"
 version = "2.4.6"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.12' and sys_platform == 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'emscripten'",
-    "python_full_version < '3.12' and sys_platform == 'linux'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "(python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version < '3.12' and platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "(python_full_version < '3.12' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version < '3.12' and sys_platform == 'darwin' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d0/ad/fed0499ce6a338d2a03ebae59cd15093910c8875328855781952abf6c2fe/numpy-2.4.6.tar.gz", hash = "sha256:f3a3570c4a2a16746ac2c31a7c7c7b0c186b95ce902e33db6f28094ed7387dda", size = 20735807, upload-time = "2026-05-18T23:37:14.07Z" }
 wheels = [
@@ -1865,18 +1887,27 @@ name = "numpy"
 version = "2.5.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.15' and sys_platform == 'linux'",
-    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'linux'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'linux'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'linux' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'linux' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "(python_full_version >= '3.13' and python_full_version < '3.15' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version >= '3.12' and python_full_version < '3.15' and platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version >= '3.12' and python_full_version < '3.15' and platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "(python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version == '3.12.*' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9a/80/db0b4559e57ec36362bedbb05530a87fafbcb6067708c946967a41d449e7/numpy-2.5.2.tar.gz", hash = "sha256:d482d171c406ae88c5b19cad3b6a1c4c5209f886ab74bc44c2c865c23f52d860", size = 20773161, upload-time = "2026-08-09T13:48:27.962Z" }
 wheels = [
@@ -1953,6 +1984,7 @@ version = "12.1.3.1"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/37/6d/121efd7382d5b0284239f4ab1fc1590d86d34ed4a4a2fdb13b30ca8e5740/nvidia_cublas_cu12-12.1.3.1-py3-none-manylinux1_x86_64.whl", hash = "sha256:ee53ccca76a6fc08fb9701aa95b6ceb242cdaab118c3bb152af4e579af792728", size = 410594774, upload-time = "2023-04-19T15:50:03.519Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/ef/32a375b74bea706c93deea5613552f7c9104f961b21df423f5887eca713b/nvidia_cublas_cu12-12.1.3.1-py3-none-win_amd64.whl", hash = "sha256:2b964d60e8cf11b5e1073d179d85fa340c120e99b3067558f3cf98dd69d02906", size = 439918445, upload-time = "2023-04-19T15:56:13.346Z" },
 ]
 
 [[package]]
@@ -1961,6 +1993,7 @@ version = "12.1.105"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/00/6b218edd739ecfc60524e585ba8e6b00554dd908de2c9c66c1af3e44e18d/nvidia_cuda_cupti_cu12-12.1.105-py3-none-manylinux1_x86_64.whl", hash = "sha256:e54fde3983165c624cb79254ae9818a456eb6e87a7fd4d56a2352c24ee542d7e", size = 14109015, upload-time = "2023-04-19T15:47:32.502Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/56/0021e32ea2848c24242f6b56790bd0ccc8bf99f973ca790569c6ca028107/nvidia_cuda_cupti_cu12-12.1.105-py3-none-win_amd64.whl", hash = "sha256:bea8236d13a0ac7190bd2919c3e8e6ce1e402104276e6f9694479e48bb0eb2a4", size = 10154340, upload-time = "2023-04-19T15:53:33.563Z" },
 ]
 
 [[package]]
@@ -1969,6 +2002,7 @@ version = "12.1.105"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b6/9f/c64c03f49d6fbc56196664d05dba14e3a561038a81a638eeb47f4d4cfd48/nvidia_cuda_nvrtc_cu12-12.1.105-py3-none-manylinux1_x86_64.whl", hash = "sha256:339b385f50c309763ca65456ec75e17bbefcbbf2893f462cb8b90584cd27a1c2", size = 23671734, upload-time = "2023-04-19T15:48:32.42Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/1d/f76987c4f454eb86e0b9a0e4f57c3bf1ac1d13ad13cd1a4da4eb0e0c0ce9/nvidia_cuda_nvrtc_cu12-12.1.105-py3-none-win_amd64.whl", hash = "sha256:0a98a522d9ff138b96c010a65e145dc1b4850e9ecb75a0172371793752fd46ed", size = 19331863, upload-time = "2023-04-19T15:54:34.603Z" },
 ]
 
 [[package]]
@@ -1977,6 +2011,7 @@ version = "12.1.105"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/eb/d5/c68b1d2cdfcc59e72e8a5949a37ddb22ae6cade80cd4a57a84d4c8b55472/nvidia_cuda_runtime_cu12-12.1.105-py3-none-manylinux1_x86_64.whl", hash = "sha256:6e258468ddf5796e25f1dc591a31029fa317d97a0a94ed93468fc86301d61e40", size = 823596, upload-time = "2023-04-19T15:47:22.471Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/e2/7a2b4b5064af56ea8ea2d8b2776c0f2960d95c88716138806121ae52a9c9/nvidia_cuda_runtime_cu12-12.1.105-py3-none-win_amd64.whl", hash = "sha256:dfb46ef84d73fababab44cf03e3b83f80700d27ca300e537f85f636fac474344", size = 821226, upload-time = "2023-04-19T15:53:23.082Z" },
 ]
 
 [[package]]
@@ -1984,10 +2019,11 @@ name = "nvidia-cudnn-cu12"
 version = "9.1.0.70"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cublas-cu12", marker = "sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9f/fd/713452cd72343f682b1c7b9321e23829f00b842ceaedcda96e742ea0b0b3/nvidia_cudnn_cu12-9.1.0.70-py3-none-manylinux2014_x86_64.whl", hash = "sha256:165764f44ef8c61fcdfdfdbe769d687e06374059fbb388b6c89ecb0e28793a6f", size = 664752741, upload-time = "2024-04-22T15:24:15.253Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/d0/f90ee6956a628f9f04bf467932c0a25e5a7e706a684b896593c06c82f460/nvidia_cudnn_cu12-9.1.0.70-py3-none-win_amd64.whl", hash = "sha256:6278562929433d68365a07a4a1546c237ba2849852c0d4b2262a486e805b977a", size = 679925892, upload-time = "2024-04-22T15:24:53.333Z" },
 ]
 
 [[package]]
@@ -1996,6 +2032,7 @@ version = "11.0.2.54"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/86/94/eb540db023ce1d162e7bea9f8f5aa781d57c65aed513c33ee9a5123ead4d/nvidia_cufft_cu12-11.0.2.54-py3-none-manylinux1_x86_64.whl", hash = "sha256:794e3948a1aa71fd817c3775866943936774d1c14e7628c74f6f7417224cdf56", size = 121635161, upload-time = "2023-04-19T15:50:46Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/57/7927a3aa0e19927dfed30256d1c854caf991655d847a4e7c01fe87e3d4ac/nvidia_cufft_cu12-11.0.2.54-py3-none-win_amd64.whl", hash = "sha256:d9ac353f78ff89951da4af698f80870b1534ed69993f10a4cf1d96f21357e253", size = 121344196, upload-time = "2023-04-19T15:56:59.562Z" },
 ]
 
 [[package]]
@@ -2004,6 +2041,7 @@ version = "10.3.2.106"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/44/31/4890b1c9abc496303412947fc7dcea3d14861720642b49e8ceed89636705/nvidia_curand_cu12-10.3.2.106-py3-none-manylinux1_x86_64.whl", hash = "sha256:9d264c5036dde4e64f1de8c50ae753237c12e0b1348738169cd0f8a536c0e1e0", size = 56467784, upload-time = "2023-04-19T15:51:04.804Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/97/4c9c7c79efcdf5b70374241d48cf03b94ef6707fd18ea0c0f53684931d0b/nvidia_curand_cu12-10.3.2.106-py3-none-win_amd64.whl", hash = "sha256:75b6b0c574c0037839121317e17fd01f8a69fd2ef8e25853d826fec30bdba74a", size = 55995813, upload-time = "2023-04-19T15:57:16.676Z" },
 ]
 
 [[package]]
@@ -2011,12 +2049,13 @@ name = "nvidia-cusolver-cu12"
 version = "11.4.5.107"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12" },
-    { name = "nvidia-cusparse-cu12" },
-    { name = "nvidia-nvjitlink-cu12" },
+    { name = "nvidia-cublas-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cusparse-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bc/1d/8de1e5c67099015c834315e333911273a8c6aaba78923dd1d1e25fc5f217/nvidia_cusolver_cu12-11.4.5.107-py3-none-manylinux1_x86_64.whl", hash = "sha256:8a7ec542f0412294b15072fa7dab71d31334014a69f953004ea7a118206fe0dd", size = 124161928, upload-time = "2023-04-19T15:51:25.781Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/80/8fca0bf819122a631c3976b6fc517c1b10741b643b94046bd8dd451522c5/nvidia_cusolver_cu12-11.4.5.107-py3-none-win_amd64.whl", hash = "sha256:74e0c3a24c78612192a74fcd90dd117f1cf21dea4822e66d89e8ea80e3cd2da5", size = 121643081, upload-time = "2023-04-19T15:57:43.035Z" },
 ]
 
 [[package]]
@@ -2024,10 +2063,11 @@ name = "nvidia-cusparse-cu12"
 version = "12.1.0.106"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12" },
+    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/65/5b/cfaeebf25cd9fdec14338ccb16f6b2c4c7fa9163aefcf057d86b9cc248bb/nvidia_cusparse_cu12-12.1.0.106-py3-none-manylinux1_x86_64.whl", hash = "sha256:f3b50f42cf363f86ab21f720998517a659a48131e8d538dc02f8768237bd884c", size = 195958278, upload-time = "2023-04-19T15:51:49.939Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/95/48fdbba24c93614d1ecd35bc6bdc6087bd17cbacc3abc4b05a9c2a1ca232/nvidia_cusparse_cu12-12.1.0.106-py3-none-win_amd64.whl", hash = "sha256:b798237e81b9719373e8fae8d4f091b70a0cf09d9d85c95a557e11df2d8e9a5a", size = 195414588, upload-time = "2023-04-19T15:58:08.389Z" },
 ]
 
 [[package]]
@@ -2040,10 +2080,12 @@ wheels = [
 
 [[package]]
 name = "nvidia-nvjitlink-cu12"
-version = "12.9.86"
+version = "12.4.127"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/46/0c/c75bbfb967457a0b7670b8ad267bfc4fffdf341c074e0a80db06c24ccfd4/nvidia_nvjitlink_cu12-12.9.86-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:e3f1171dbdc83c5932a45f0f4c99180a70de9bd2718c1ab77d14104f6d7147f9", size = 39748338, upload-time = "2025-06-05T20:10:25.613Z" },
+    { url = "https://files.pythonhosted.org/packages/02/45/239d52c05074898a80a900f49b1615d81c07fceadd5ad6c4f86a987c0bc4/nvidia_nvjitlink_cu12-12.4.127-py3-none-manylinux2014_aarch64.whl", hash = "sha256:4abe7fef64914ccfa909bc2ba39739670ecc9e820c83ccc7a6ed414122599b83", size = 20552510, upload-time = "2024-06-18T20:20:13.871Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/ff/847841bacfbefc97a00036e0fce5a0f086b640756dc38caea5e1bb002655/nvidia_nvjitlink_cu12-12.4.127-py3-none-manylinux2014_x86_64.whl", hash = "sha256:06b3b9b25bf3f8af351d664978ca26a16d2c5127dbd53c0497e28d1fb9611d57", size = 21066810, upload-time = "2024-04-03T20:59:46.957Z" },
+    { url = "https://files.pythonhosted.org/packages/81/19/0babc919031bee42620257b9a911c528f05fb2688520dcd9ca59159ffea8/nvidia_nvjitlink_cu12-12.4.127-py3-none-win_amd64.whl", hash = "sha256:fd9020c501d27d135f983c6d3e244b197a7ccad769e34df53a42e276b0e25fa1", size = 95336325, upload-time = "2024-04-03T21:06:25.073Z" },
 ]
 
 [[package]]
@@ -2052,6 +2094,7 @@ version = "12.1.105"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/da/d3/8057f0587683ed2fcd4dbfbdfdfa807b9160b809976099d36b8f60d08f03/nvidia_nvtx_cu12-12.1.105-py3-none-manylinux1_x86_64.whl", hash = "sha256:dc21cf308ca5691e7c04d962e213f8a4aa9bbfa23d95412f452254c2caeb09e5", size = 99138, upload-time = "2023-04-19T15:48:43.556Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/d7/bd7cb2d95ac6ac6e8d05bfa96cdce69619f1ef2808e072919044c2d47a8c/nvidia_nvtx_cu12-12.1.105-py3-none-win_amd64.whl", hash = "sha256:65f4d98982b31b60026e0e6de73fbdfc09d08a96f4656dd3665ca616a11e1e82", size = 66307, upload-time = "2023-04-19T15:54:45.736Z" },
 ]
 
 [[package]]
@@ -2153,10 +2196,10 @@ name = "pandas"
 version = "3.0.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "python-dateutil" },
-    { name = "tzdata", marker = "sys_platform == 'emscripten' or sys_platform == 'win32'" },
+    { name = "tzdata", marker = "sys_platform == 'emscripten' or sys_platform == 'win32' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/4f/5f3422a2afec5ffc46308b79e53291365a93748b498ac2e58bead0197916/pandas-3.0.5.tar.gz", hash = "sha256:dca3734d6ab7c906e6730f0788b0a1dbb9f2467731f9711f77995c8e9d62d712", size = 4658219, upload-time = "2026-07-22T22:19:28.819Z" }
 wheels = [
@@ -2208,8 +2251,8 @@ name = "pandas-stubs"
 version = "3.0.5.260730"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c2/d2/dea4a3a56b7b5f69c5fbca9f14625fcf28e1a39a657e9833d4a10bcac593/pandas_stubs-3.0.5.260730.tar.gz", hash = "sha256:f70a232c57d93a5a2c81f8a53953e10891a5374bc92652277deb325e2e4d0ff3", size = 114631, upload-time = "2026-07-30T14:31:42.271Z" }
 wheels = [
@@ -2230,8 +2273,8 @@ name = "patsy"
 version = "1.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/44/ed13eccdd0519eff265f44b670d46fbb0ec813e2274932dc1c0e48520f7d/patsy-1.0.2.tar.gz", hash = "sha256:cdc995455f6233e90e22de72c37fcadb344e7586fb83f06696f54d92f8ce74c0", size = 399942, upload-time = "2025-10-20T16:17:37.535Z" }
 wheels = [
@@ -2694,7 +2737,7 @@ name = "pytest"
 version = "9.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "iniconfig" },
     { name = "packaging" },
     { name = "pluggy" },
@@ -2757,12 +2800,12 @@ name = "pytorch-lightning"
 version = "2.6.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "fsspec", extra = ["http"] },
+    { name = "fsspec", extra = ["http"], marker = "extra == 'extra-8-volbench-tsfm'" },
     { name = "lightning-utilities" },
     { name = "packaging" },
     { name = "pyyaml" },
-    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "sys_platform == 'linux'" },
+    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "torchmetrics" },
     { name = "tqdm" },
     { name = "typing-extensions" },
@@ -3013,13 +3056,20 @@ name = "scipy"
 version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.12' and sys_platform == 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'emscripten'",
-    "python_full_version < '3.12' and sys_platform == 'linux'",
-    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform == 'linux' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "(python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version < '3.12' and platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "(python_full_version < '3.12' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version < '3.12' and sys_platform == 'darwin' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" } },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
 wheels = [
@@ -3090,21 +3140,30 @@ name = "scipy"
 version = "1.18.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.15' and sys_platform == 'linux'",
-    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'linux'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'linux'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform == 'linux' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'linux' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm'",
+    "(python_full_version >= '3.13' and python_full_version < '3.15' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version >= '3.12' and python_full_version < '3.15' and platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version >= '3.12' and python_full_version < '3.15' and platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "(python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm') or (python_full_version == '3.12.*' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm')",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-volbench-torch-cpu' and extra != 'extra-8-volbench-tsfm'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" } },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7e/74/66de6258867beb2ef08f35f9f2ac017a52cacd5081714d239ff1a442d458/scipy-1.18.1.tar.gz", hash = "sha256:52c4b7422442aba924d03ad4019852b08a92e64ea187b933135687bfe2747307", size = 30781235, upload-time = "2026-08-21T23:28:50.599Z" }
 wheels = [
@@ -3202,13 +3261,13 @@ name = "statsmodels"
 version = "0.14.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "packaging" },
     { name = "pandas" },
     { name = "patsy" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0d/81/e8d74b34f85285f7335d30c5e3c2d7c0346997af9f3debf9a0a9a63de184/statsmodels-0.14.6.tar.gz", hash = "sha256:4d17873d3e607d398b85126cd4ed7aad89e4e9d89fc744cdab1af3189a996c2a", size = 20689085, upload-time = "2025-12-05T23:08:39.522Z" }
 wheels = [
@@ -3267,8 +3326,8 @@ dependencies = [
     { name = "absl-py" },
     { name = "grpcio" },
     { name = "markdown" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "packaging" },
     { name = "pillow" },
     { name = "protobuf" },
@@ -3295,9 +3354,9 @@ name = "timesfm"
 version = "2.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "huggingface-hub" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "huggingface-hub", marker = "extra == 'extra-8-volbench-tsfm'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "safetensors" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/48/16/503864c985a1f213ae6182ece73b6538c468b5cd5c21158ede9db3333732/timesfm-2.0.2.tar.gz", hash = "sha256:b03885d3467b09314a4b461e1f6729375844061dd31fd41e3c35aa503c333da3", size = 44127, upload-time = "2026-07-02T18:55:31.815Z" }
@@ -3307,8 +3366,8 @@ wheels = [
 
 [package.optional-dependencies]
 torch = [
-    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "sys_platform == 'linux'" },
+    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 
 [[package]]
@@ -3403,35 +3462,93 @@ wheels = [
 [[package]]
 name = "torch"
 version = "2.5.1"
+source = { registry = "https://download.pytorch.org/whl/cpu" }
+resolution-markers = [
+    "(python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version == '3.12.*' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux')",
+    "(python_full_version < '3.12' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'darwin')",
+]
+dependencies = [
+    { name = "filelock", marker = "(python_full_version < '3.13' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and sys_platform == 'darwin')" },
+    { name = "fsspec", marker = "(python_full_version < '3.13' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and sys_platform == 'darwin')" },
+    { name = "jinja2", marker = "(python_full_version < '3.13' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and sys_platform == 'darwin')" },
+    { name = "networkx", marker = "(python_full_version < '3.13' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and sys_platform == 'darwin')" },
+    { name = "setuptools", marker = "(python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version == '3.12.*' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux')" },
+    { name = "sympy", marker = "(python_full_version < '3.13' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and sys_platform == 'darwin')" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.13' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and sys_platform == 'darwin')" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.5.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d5b3203f191bc40783c99488d2e776dcf93ac431a59491d627a1ca5b3ae20b22", upload-time = "2024-10-29T23:02:06Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.5.1-cp311-none-macosx_11_0_arm64.whl", hash = "sha256:31f8c39660962f9ae4eeec995e3049b5492eb7360dd4f07377658ef4d728fa4c", upload-time = "2024-10-29T23:02:11Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.5.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:36d1be99281b6f602d9639bd0af3ee0006e7aab16f6718d86f709d395b6f262c", upload-time = "2024-10-29T23:02:14Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.5.1-cp312-none-macosx_11_0_arm64.whl", hash = "sha256:8c712df61101964eb11910a846514011f0b6f5920c55dbf567bff8a34163d5b1", upload-time = "2024-10-29T23:02:18Z" },
+]
+
+[[package]]
+name = "torch"
+version = "2.5.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
     "python_full_version < '3.12' and sys_platform == 'win32'",
     "python_full_version < '3.12' and sys_platform == 'emscripten'",
     "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "filelock" },
-    { name = "fsspec" },
-    { name = "jinja2" },
-    { name = "networkx" },
-    { name = "setuptools", marker = "python_full_version >= '3.12'" },
-    { name = "sympy" },
-    { name = "typing-extensions" },
+    { name = "filelock", marker = "sys_platform != 'linux'" },
+    { name = "fsspec", marker = "sys_platform != 'linux'" },
+    { name = "jinja2", marker = "sys_platform != 'linux'" },
+    { name = "networkx", marker = "sys_platform != 'linux'" },
+    { name = "setuptools", marker = "python_full_version >= '3.12' and sys_platform != 'linux'" },
+    { name = "sympy", marker = "sys_platform != 'linux'" },
+    { name = "typing-extensions", marker = "sys_platform != 'linux'" },
 ]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/35/e8b2daf02ce933e4518e6f5682c72fd0ed66c15910ea1fb4168f442b71c4/torch-2.5.1-cp311-cp311-manylinux1_x86_64.whl", hash = "sha256:de5b7d6740c4b636ef4db92be922f0edc425b65ed78c5076c43c42d362a45457", size = 906474467, upload-time = "2024-10-29T17:38:49.832Z" },
+    { url = "https://files.pythonhosted.org/packages/40/04/bd91593a4ca178ece93ca55f27e2783aa524aaccbfda66831d59a054c31e/torch-2.5.1-cp311-cp311-manylinux2014_aarch64.whl", hash = "sha256:340ce0432cad0d37f5a31be666896e16788f1adf8ad7be481196b503dad675b9", size = 91919450, upload-time = "2024-10-29T17:37:26.693Z" },
     { url = "https://files.pythonhosted.org/packages/0d/4a/e51420d46cfc90562e85af2fee912237c662ab31140ab179e49bd69401d6/torch-2.5.1-cp311-cp311-win_amd64.whl", hash = "sha256:603c52d2fe06433c18b747d25f5c333f9c1d58615620578c326d66f258686f9a", size = 203098237, upload-time = "2024-10-29T17:36:11.731Z" },
     { url = "https://files.pythonhosted.org/packages/d0/db/5d9cbfbc7968d79c5c09a0bc0bc3735da079f2fd07cc10498a62b320a480/torch-2.5.1-cp311-none-macosx_11_0_arm64.whl", hash = "sha256:31f8c39660962f9ae4eeec995e3049b5492eb7360dd4f07377658ef4d728fa4c", size = 63884466, upload-time = "2024-10-29T17:33:02.899Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/5c/36c114d120bfe10f9323ed35061bc5878cc74f3f594003854b0ea298942f/torch-2.5.1-cp312-cp312-manylinux1_x86_64.whl", hash = "sha256:ed231a4b3a5952177fafb661213d690a72caaad97d5824dd4fc17ab9e15cec03", size = 906389343, upload-time = "2024-10-29T17:37:06.758Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/69/d8ada8b6e0a4257556d5b4ddeb4345ea8eeaaef3c98b60d1cca197c7ad8e/torch-2.5.1-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:3f4b7f10a247e0dcd7ea97dc2d3bfbfc90302ed36d7f3952b0008d0df264e697", size = 91811673, upload-time = "2024-10-29T17:32:42.789Z" },
     { url = "https://files.pythonhosted.org/packages/5f/ba/607d013b55b9fd805db2a5c2662ec7551f1910b4eef39653eeaba182c5b2/torch-2.5.1-cp312-cp312-win_amd64.whl", hash = "sha256:73e58e78f7d220917c5dbfad1a40e09df9929d3b95d25e57d9f8558f84c9a11c", size = 203046841, upload-time = "2024-10-29T17:35:48.665Z" },
     { url = "https://files.pythonhosted.org/packages/57/6c/bf52ff061da33deb9f94f4121fde7ff3058812cb7d2036c97bc167793bd1/torch-2.5.1-cp312-none-macosx_11_0_arm64.whl", hash = "sha256:8c712df61101964eb11910a846514011f0b6f5920c55dbf567bff8a34163d5b1", size = 63858109, upload-time = "2024-10-29T17:36:21.973Z" },
+    { url = "https://files.pythonhosted.org/packages/69/72/20cb30f3b39a9face296491a86adb6ff8f1a47a897e4d14667e6cf89d5c3/torch-2.5.1-cp313-cp313-manylinux1_x86_64.whl", hash = "sha256:9b61edf3b4f6e3b0e0adda8b3960266b9009d02b37555971f4d1c8f7a05afed7", size = 906393265, upload-time = "2024-10-29T17:35:06.866Z" },
+]
+
+[[package]]
+name = "torch"
+version = "2.5.1+cpu"
+source = { registry = "https://download.pytorch.org/whl/cpu" }
+resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten'",
+    "(python_full_version >= '3.13' and python_full_version < '3.15' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version >= '3.12' and python_full_version < '3.15' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and python_full_version < '3.15' and platform_python_implementation != 'CPython' and sys_platform == 'linux') or (python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten'",
+    "(python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.12' and platform_python_implementation != 'CPython' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')",
+]
+dependencies = [
+    { name = "filelock", marker = "(python_full_version >= '3.15' and sys_platform == 'darwin') or (python_full_version >= '3.13' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
+    { name = "fsspec", marker = "(python_full_version >= '3.15' and sys_platform == 'darwin') or (python_full_version >= '3.13' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
+    { name = "jinja2", marker = "(python_full_version >= '3.15' and sys_platform == 'darwin') or (python_full_version >= '3.13' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
+    { name = "networkx", marker = "(python_full_version >= '3.15' and sys_platform == 'darwin') or (python_full_version >= '3.13' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
+    { name = "setuptools", marker = "(python_full_version >= '3.13' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and platform_python_implementation != 'CPython' and sys_platform == 'linux') or (python_full_version >= '3.15' and sys_platform == 'darwin') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')" },
+    { name = "sympy", marker = "(python_full_version >= '3.15' and sys_platform == 'darwin') or (python_full_version >= '3.13' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
+    { name = "typing-extensions", marker = "(python_full_version >= '3.15' and sys_platform == 'darwin') or (python_full_version >= '3.13' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.5.1%2Bcpu-cp311-cp311-linux_x86_64.whl", hash = "sha256:07d7c9e069123d5af08b0cf0013d74f680b2d8be7d9e2cf561a52c90c55d9409", upload-time = "2024-10-29T23:00:55Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.5.1%2Bcpu-cp311-cp311-win_amd64.whl", hash = "sha256:81531d4d5ca74163dc9574b87396531e546a60cceb6253303c7db6a21e867fdf", upload-time = "2024-10-29T23:01:02Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.5.1%2Bcpu-cp312-cp312-linux_x86_64.whl", hash = "sha256:4856f9d6925121d13c2df07aa7580b767f449dfe71ae5acde9c27535d5da4840", upload-time = "2024-10-29T23:01:13Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.5.1%2Bcpu-cp312-cp312-win_amd64.whl", hash = "sha256:a6b720410350765d3d77c01a5ce098a6c45af446284e45e87a98b8a16e7d564d", upload-time = "2024-10-29T23:01:21Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.5.1%2Bcpu-cp313-cp313-linux_x86_64.whl", hash = "sha256:5dbbdf83caa90d0bcaa50e4933ca424889133b35226db79000877d4ec5d9ea37", upload-time = "2024-10-29T23:01:30Z" },
 ]
 
 [[package]]
@@ -3440,34 +3557,35 @@ version = "2.5.1+cu121"
 source = { registry = "https://download.pytorch.org/whl/cu121" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'linux'",
-    "python_full_version == '3.14.*' and sys_platform == 'linux'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'linux'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'linux'",
     "python_full_version < '3.12' and sys_platform == 'linux'",
 ]
 dependencies = [
-    { name = "filelock" },
-    { name = "fsspec" },
-    { name = "jinja2" },
-    { name = "networkx" },
-    { name = "nvidia-cublas-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "nvidia-cuda-cupti-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "nvidia-cuda-nvrtc-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "nvidia-cuda-runtime-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "nvidia-cudnn-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "nvidia-cufft-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "nvidia-curand-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "nvidia-cusolver-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "nvidia-cusparse-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "nvidia-nccl-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "nvidia-nvtx-cu12", marker = "platform_machine == 'x86_64'" },
-    { name = "setuptools", marker = "python_full_version >= '3.12'" },
-    { name = "sympy" },
-    { name = "triton", marker = "python_full_version < '3.13' and platform_machine == 'x86_64'" },
-    { name = "typing-extensions" },
+    { name = "filelock", marker = "sys_platform == 'linux'" },
+    { name = "fsspec", marker = "sys_platform == 'linux'" },
+    { name = "jinja2", marker = "sys_platform == 'linux'" },
+    { name = "networkx", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cublas-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-cuda-cupti-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-cuda-nvrtc-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-cuda-runtime-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-cudnn-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-cufft-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-curand-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-cusolver-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-cusparse-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-nccl-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-nvtx-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "setuptools", marker = "python_full_version >= '3.12' and sys_platform == 'linux'" },
+    { name = "sympy", marker = "sys_platform == 'linux'" },
+    { name = "triton", marker = "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "typing-extensions", marker = "sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cu121/torch-2.5.1%2Bcu121-cp311-cp311-linux_x86_64.whl", hash = "sha256:c8ab8c92eab928a93c483f83ca8c63f13dafc10fc93ad90ed2dcb7c82ea50410", upload-time = "2024-10-29T23:18:06Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu121/torch-2.5.1%2Bcu121-cp311-cp311-win_amd64.whl", hash = "sha256:4bcee18f00c43c815efad8efaa3bca584ffdc8d2cd35ef4c44c814f2739d9191", upload-time = "2024-10-29T23:18:42Z" },
     { url = "https://download-r2.pytorch.org/whl/cu121/torch-2.5.1%2Bcu121-cp312-cp312-linux_x86_64.whl", hash = "sha256:222be02548c2e74a21a8fbc8e5b8d2eef9f9faee865d70385d2eb1b9aabcbc76", upload-time = "2024-10-29T23:20:25Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu121/torch-2.5.1%2Bcu121-cp312-cp312-win_amd64.whl", hash = "sha256:473d76257636c66b22cbfac6f616d6b522ef3d3473c13decb1afda22a7b059eb", upload-time = "2024-10-29T23:20:59Z" },
     { url = "https://download-r2.pytorch.org/whl/cu121/torch-2.5.1%2Bcu121-cp313-cp313-linux_x86_64.whl", hash = "sha256:1bfe18b79b0ff9be9383257a66c3f84621ce5f384f02c0a7c79503583d6ffd4b", upload-time = "2024-10-29T23:22:42Z" },
 ]
 
@@ -3477,11 +3595,11 @@ version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lightning-utilities" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "packaging" },
-    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "sys_platform == 'linux'" },
+    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/81/34/39b8b749333db56c0585d7a11fa62a283c087bb1dfc897d69fb8cedbefb1/torchmetrics-1.9.0.tar.gz", hash = "sha256:a488609948600df52d3db4fcdab02e62aab2a85ef34da67037dc3e65b8512faa", size = 581765, upload-time = "2026-03-09T17:41:22.443Z" }
 wheels = [
@@ -3506,8 +3624,8 @@ version = "5.15.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "packaging" },
     { name = "pyyaml" },
     { name = "regex" },
@@ -3526,7 +3644,7 @@ name = "triton"
 version = "3.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "filelock" },
+    { name = "filelock", marker = "python_full_version < '3.15' and sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/86/17/d9a5cf4fcf46291856d1e90762e36cbabd2a56c7265da0d1d9508c8e3943/triton-3.1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0f34f6e7885d1bf0eaaf7ba875a5f0ce6f3c13ba98f9503651c1e6dc6757ed5c", size = 209506424, upload-time = "2024-10-14T16:05:42.337Z" },
@@ -3588,21 +3706,21 @@ dependencies = [
     { name = "gluonts" },
     { name = "huggingface-hub" },
     { name = "hydra-core" },
-    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "jaxtyping" },
     { name = "lightning" },
     { name = "multiprocess" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "orjson" },
     { name = "python-dotenv" },
     { name = "safetensors" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "tensorboard" },
-    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "sys_platform == 'linux'" },
+    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/04/5f/0691394ea8700f9d23348dc7f8a10d5e2872f0aa5c559628479f6adab12d/uni2ts-2.0.0.tar.gz", hash = "sha256:184b386db71a92f94a8961c1010fbcc126814b873faabc6a76ed680579c8d4be", size = 102633, upload-time = "2025-11-04T04:30:23.205Z" }
 wheels = [
@@ -3624,8 +3742,8 @@ version = "0.2.16"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "narwhals" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "packaging" },
     { name = "pandas" },
 ]
@@ -3655,23 +3773,27 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "arch" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "requests" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "statsmodels" },
 ]
 
 [package.optional-dependencies]
+torch-cpu = [
+    { name = "torch", version = "2.5.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.13' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu') or (python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-8-volbench-torch-cpu') or (python_full_version >= '3.13' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm') or (sys_platform == 'darwin' and extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "torch", version = "2.5.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.15' and sys_platform == 'darwin' and extra == 'extra-8-volbench-torch-cpu') or (python_full_version >= '3.13' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu') or (python_full_version < '3.13' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm') or (platform_machine != 'aarch64' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu') or (platform_python_implementation != 'CPython' and sys_platform == 'linux' and extra == 'extra-8-volbench-torch-cpu') or (sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-8-volbench-torch-cpu') or (sys_platform == 'darwin' and extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+]
 tsfm = [
     { name = "chronos-forecasting" },
     { name = "nixtla" },
-    { name = "timesfm", extra = ["torch"] },
-    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "sys_platform == 'linux'" },
+    { name = "timesfm", extra = ["torch"], marker = "extra == 'extra-8-volbench-tsfm'" },
+    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
+    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-volbench-tsfm') or (extra == 'extra-8-volbench-torch-cpu' and extra == 'extra-8-volbench-tsfm')" },
     { name = "uni2ts" },
 ]
 
@@ -3697,11 +3819,12 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "statsmodels", specifier = ">=0.14.6" },
     { name = "timesfm", extras = ["torch"], marker = "extra == 'tsfm'", specifier = ">=2.0.2,<3" },
-    { name = "torch", marker = "sys_platform == 'linux' and extra == 'tsfm'", specifier = "==2.5.1", index = "https://download.pytorch.org/whl/cu121" },
+    { name = "torch", marker = "sys_platform == 'linux' and extra == 'tsfm'", specifier = "==2.5.1", index = "https://download.pytorch.org/whl/cu121", conflict = { package = "volbench", extra = "tsfm" } },
     { name = "torch", marker = "sys_platform != 'linux' and extra == 'tsfm'", specifier = "==2.5.1" },
+    { name = "torch", marker = "extra == 'torch-cpu'", specifier = "==2.5.1", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "volbench", extra = "torch-cpu" } },
     { name = "uni2ts", marker = "extra == 'tsfm'", specifier = ">=2.0.0,<3" },
 ]
-provides-extras = ["tsfm"]
+provides-extras = ["tsfm", "torch-cpu"]
 
 [package.metadata.requires-dev]
 dev = [

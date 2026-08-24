@@ -17,7 +17,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv sync --dev
-      - run: uv run ruff check .
-      - run: uv run mypy
-      - run: uv run pytest
+      # torch-cpu: the CPU build of the pinned torch, so the PatchTST baseline's
+      # 2-epoch smoke test runs here. The tsfm-marked and gpu-marked tests stay
+      # skipped (tests/conftest.py never honours their opt-ins under CI).
+      - run: uv sync --dev --extra torch-cpu
+      - run: uv run --extra torch-cpu ruff check .
+      - run: uv run --extra torch-cpu mypy
+      - run: uv run --extra torch-cpu pytest

@@ -1,5 +1,12 @@
 .PHONY: test lint type check reproduce benchmark clean-results
 
+# torch is optional and comes in two conflicting builds: `uv sync --dev
+# --extra tsfm` (cu121, the GPU box) or `--extra torch-cpu` (CI, laptops).
+# `uv run` keeps whichever is synced, so the targets below carry no extra —
+# adding `--extra torch-cpu` here would silently swap the GPU build out.
+# Without torch the PatchTST/TSFM tests importorskip; run the opt-in sets with
+# VOLBENCH_RUN_TSFM=1 / VOLBENCH_RUN_GPU=1 (see tests/conftest.py).
+
 TOY_FIXTURE := src/volbench/benchmarks/data/toy_asset_daily.csv
 TOY_OUT     := data/toy_benchmark
 
