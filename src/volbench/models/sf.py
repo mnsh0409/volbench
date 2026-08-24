@@ -106,11 +106,10 @@ import dataclasses
 import math
 from dataclasses import dataclass
 from statistics import NormalDist
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 from numpy.typing import NDArray
-from statsforecast.models import AutoARIMA, AutoETS
 
 from volbench.dist import Distribution, Normal
 from volbench.models._rv import (
@@ -149,8 +148,14 @@ _ARIMA_APPROXIMATION: Final = False
 #: The two statsforecast classes this adapter drives. A union of the concrete
 #: classes rather than a structural Protocol: statsforecast ships ``py.typed``,
 #: so mypy checks the real signatures, and a hand-written Protocol would only
-#: be a second, drift-prone copy of them.
-_Backend = AutoETS | AutoARIMA
+#: be a second, drift-prone copy of them. Imported for typing only: the backend
+#: lives in the optional ``classical`` extra, and this module is re-exported
+#: from ``volbench.models``, so the runtime import happens inside ``fit`` and
+#: ``import volbench`` never needs statsforecast (Phase-2 integration).
+if TYPE_CHECKING:
+    from statsforecast.models import AutoARIMA, AutoETS
+
+    _Backend = AutoETS | AutoARIMA
 
 
 def _at(forecast: dict[str, Any], key: str, h: int) -> float:
@@ -265,6 +270,8 @@ class AutoETSRV:
         }
 
     def fit(self, train: NDArray[np.float64], **ctx: Any) -> FittedStatsForecastRV:
+        from statsforecast.models import AutoETS
+
         backend = AutoETS(
             season_length=self.season_length, model=_ETS_MODEL, damped=self.damped
         )
@@ -313,6 +320,8 @@ class AutoARIMARV:
         }
 
     def fit(self, train: NDArray[np.float64], **ctx: Any) -> FittedStatsForecastRV:
+        from statsforecast.models import AutoARIMA
+
         backend = AutoARIMA(
             season_length=self.season_length,
             seasonal=self.season_length > 1,

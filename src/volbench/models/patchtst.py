@@ -107,6 +107,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from volbench.dist import Distribution, Normal
+from volbench.models._rv import validated_rv, variance_from_log
 
 __all__ = ["FittedPatchTST", "PatchTST"]
 
@@ -121,17 +122,6 @@ def _torch_version() -> str:
         return version("torch")
     except PackageNotFoundError:
         return "not-installed"
-
-
-def _validated_rv(train: NDArray[np.float64], minimum: int) -> NDArray[np.float64]:
-    rv = np.asarray(train, dtype=np.float64)
-    if rv.ndim != 1 or rv.size < minimum:
-        raise ValueError(
-            f"train must be a 1-D realized-variance series with at least {minimum} observations"
-        )
-    if not np.isfinite(rv).all() or (rv <= 0.0).any():
-        raise ValueError("realized-variance series must be finite and strictly positive")
-    return rv
 
 
 @dataclass(frozen=True, eq=False)
@@ -169,14 +159,11 @@ class FittedPatchTST:
             raise ValueError(f"h={h} exceeds max_horizon={self.model.max_horizon}")
         mu = float(self.log_forecast[h - 1])
         factor = float(self.smearing[h - 1])
-        if not (math.isfinite(mu) and math.isfinite(factor) and factor > 0.0):
-            raise ValueError(f"unusable log forecast {mu!r} / smearing factor {factor!r}")
-        vhat = math.exp(mu) * factor
-        if not (math.isfinite(vhat) and vhat > 0.0):
-            raise ValueError(
-                f"retransformed variance forecast is not positive and finite: {vhat!r}"
-            )
-        return Normal(mu=0.0, sigma=math.sqrt(vhat))
+        if not (math.isfinite(factor) and factor > 0.0):
+            raise ValueError(f"unusable smearing factor {factor!r}")
+        # Same retransformation as models/sf.py and models/lgbm.py (Duan
+        # smearing, `volbench.models._rv`); the factor itself is per horizon.
+        return Normal(mu=0.0, sigma=math.sqrt(variance_from_log(mu, factor)))
 
 
 @dataclass(frozen=True)
@@ -272,7 +259,7 @@ class PatchTST:
         }
 
     def fit(self, train: NDArray[np.float64], **ctx: Any) -> FittedPatchTST:
-        rv = _validated_rv(train, minimum=self.min_train)
+        rv = validated_rv(train, minimum=self.min_train)
         from volbench.models._patchtst_net import train_and_forecast
 
         result = train_and_forecast(

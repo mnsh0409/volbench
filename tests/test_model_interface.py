@@ -29,7 +29,10 @@ from volbench.models import (
     EWMA,
     GARCH,
     HAR,
+    AutoARIMARV,
+    AutoETSRV,
     Chronos,
+    LightGBMRV,
     Moirai,
     NaiveVol,
     PatchTST,
@@ -89,6 +92,9 @@ UNFITTED: list[ForecastModel] = [
     Moirai(backend=_BACKEND),
     TimeGPT(backend=_BACKEND),
     _PATCHTST,
+    AutoETSRV(),
+    AutoARIMARV(),
+    LightGBMRV(),
 ]
 
 #: The models that re-condition between refits. PatchTST is the deliberate
@@ -96,9 +102,19 @@ UNFITTED: list[ForecastModel] = [
 #: re-estimation is not well defined) and runs frozen.
 UPDATABLE: list[ForecastModel] = [m for m in UNFITTED if not isinstance(m, PatchTST)]
 
-#: HAR and the zero-shot foundation-model adapters are the exception: they fit
-#: on a realized-variance series, not returns (see models/har.py and
-#: models/tsfm_common.py), which is why `_train_for` has to branch at all.
+#: HAR, the classical log-RV adapters (models/sf.py, models/lgbm.py), the
+#: zero-shot foundation-model adapters and PatchTST fit on a realized-variance
+#: series, not returns (see models/har.py and models/tsfm_common.py), which is
+#: why `_train_for` has to branch at all. Optional backends are imported
+#: lazily by their adapters (so the list above is constructible without any
+#: extra installed) and `importorskip`'d here where a fit actually needs one.
+_RV_FED = HAR | ZeroShotRVModel | PatchTST | AutoETSRV | AutoARIMARV | LightGBMRV
+_BACKEND_MODULE: dict[type, str] = {
+    PatchTST: "torch",
+    AutoETSRV: "statsforecast",
+    AutoARIMARV: "statsforecast",
+    LightGBMRV: "lightgbm",
+}
 
 
 def _returns(n: int = 300, seed: int = 7) -> np.ndarray:
@@ -112,9 +128,10 @@ def _realized_variance(n: int = 300, seed: int = 7) -> np.ndarray:
 
 
 def _train_for(model: ForecastModel) -> np.ndarray:
-    if isinstance(model, PatchTST):
-        pytest.importorskip("torch")
-    if isinstance(model, HAR | ZeroShotRVModel | PatchTST):
+    backend = _BACKEND_MODULE.get(type(model))
+    if backend is not None:
+        pytest.importorskip(backend)
+    if isinstance(model, _RV_FED):
         return _realized_variance()
     return _returns()
 

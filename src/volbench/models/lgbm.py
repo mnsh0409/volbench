@@ -117,9 +117,8 @@ from __future__ import annotations
 import dataclasses
 import math
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
-import lightgbm as lgb
 import numpy as np
 from numpy.typing import NDArray
 
@@ -131,6 +130,12 @@ from volbench.models._rv import (
     validated_rv,
     variance_from_log,
 )
+
+# Typing only: lightgbm lives in the optional ``classical`` extra and this
+# module is re-exported from ``volbench.models``, so the runtime import happens
+# inside ``fit`` and ``import volbench`` never needs it (Phase-2 integration).
+if TYPE_CHECKING:
+    import lightgbm as lgb
 
 __all__ = ["FittedLightGBMRV", "LightGBMRV"]
 
@@ -356,6 +361,8 @@ class LightGBMRV:
         }
 
     def fit(self, train: NDArray[np.float64], **ctx: Any) -> FittedLightGBMRV:
+        import lightgbm as lgb
+
         rv = validated_rv(train, minimum=_MIN_TRAIN)
         x, y = _design_matrix(rv)
         dataset = lgb.Dataset(

@@ -21,8 +21,10 @@ from volbench.models.base import FittedModel, ForecastModel
 from volbench.models.ewma import EWMA, FittedEWMA
 from volbench.models.garch import GARCH, FittedGARCH, gjr_garch
 from volbench.models.har import HAR, FittedHAR
+from volbench.models.lgbm import FittedLightGBMRV, LightGBMRV
 from volbench.models.naive import FittedNaiveVol, NaiveVol
 from volbench.models.patchtst import FittedPatchTST, PatchTST
+from volbench.models.sf import AutoARIMARV, AutoETSRV, FittedStatsForecastRV
 from volbench.models.tsfm_chronos import Chronos
 from volbench.models.tsfm_common import FittedTSFM, TSFMBackend, ZeroShotRVModel
 from volbench.models.tsfm_moirai import Moirai
@@ -33,15 +35,20 @@ __all__ = [
     "EWMA",
     "GARCH",
     "HAR",
+    "AutoARIMARV",
+    "AutoETSRV",
     "Chronos",
     "FittedEWMA",
     "FittedGARCH",
     "FittedHAR",
+    "FittedLightGBMRV",
     "FittedModel",
     "FittedNaiveVol",
     "FittedPatchTST",
+    "FittedStatsForecastRV",
     "FittedTSFM",
     "ForecastModel",
+    "LightGBMRV",
     "Moirai",
     "NaiveVol",
     "PatchTST",

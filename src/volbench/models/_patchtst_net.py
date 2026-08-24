@@ -37,6 +37,8 @@ import torch
 from numpy.typing import NDArray
 from torch import nn
 
+from volbench.models._rv import smearing_factor
+
 __all__ = ["PatchTSTNet", "TrainingResult", "train_and_forecast"]
 
 #: Floor on an input window's standard deviation before instance normalization.
@@ -277,15 +279,20 @@ def train_and_forecast(
             final_train_mse = float(loss_fn(model(x_tr), t_tr).item())
             # in-sample residuals in log space, per horizon, from the training windows
             pred_tr = model(x_tr).cpu() * sd[:n_train] + mu[:n_train]
-            resid = t_all[:n_train] - pred_tr
-            smearing = torch.exp(resid.to(torch.float64)).mean(dim=0)
+            resid = (t_all[:n_train] - pred_tr).to(torch.float64).numpy()
+            # Duan's factor per horizon column, through the one shared
+            # implementation (models/_rv.py) every log-RV model retransforms with.
+            smearing = np.array(
+                [smearing_factor(resid[:, k]) for k in range(resid.shape[1])],
+                dtype=np.float64,
+            )
             # the forecast: the last `lookback` points of the window, and nothing after
             x_last = torch.as_tensor(y[-lookback:], dtype=torch.float32)[None, :]
             mu_last, sd_last = _instance_stats(x_last)
             out = model(((x_last - mu_last) / sd_last).to(dev)).cpu() * sd_last + mu_last
         return TrainingResult(
             log_forecast=out[0].to(torch.float64).numpy(),
-            smearing=smearing.numpy(),
+            smearing=smearing,
             epochs_run=epochs_run,
             best_epoch=best_epoch,
             best_val_mse=best_val,
