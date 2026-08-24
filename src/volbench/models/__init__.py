@@ -19,6 +19,7 @@ from volbench.models.har import HAR, FittedHAR
 from volbench.models.naive import FittedNaiveVol, NaiveVol
 from volbench.models.tsfm_chronos import Chronos
 from volbench.models.tsfm_common import FittedTSFM, TSFMBackend, ZeroShotRVModel
+from volbench.models.tsfm_timesfm import TimesFM, TimesFMForecastOptions
 
 __all__ = [
     "EWMA",
@@ -34,6 +35,8 @@ __all__ = [
     "ForecastModel",
     "NaiveVol",
     "TSFMBackend",
+    "TimesFM",
+    "TimesFMForecastOptions",
     "ZeroShotRVModel",
     "gjr_garch",
 ]
