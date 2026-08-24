@@ -36,6 +36,21 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/mnsh0409/volbench"
 
+# Zero-shot time-series foundation models (docs/research_design.md models
+# 10-13; decision D-005: zero-shot only). Never installed in CI — the default
+# test suite skips every @pytest.mark.tsfm test (see tests/conftest.py).
+#   uv sync --dev --extra tsfm
+# torch is pinned to the CUDA build already proven on the 4090 box
+# (2.5.1+cu121, see [tool.uv.sources]); the tsfm-marked tests run there.
+[project.optional-dependencies]
+tsfm = [
+    "torch==2.5.1",
+    "chronos-forecasting>=2.3.1,<3",
+    "timesfm[torch]>=2.0.2,<3",
+    "uni2ts>=2.0.0,<3",
+    "nixtla>=0.8.0,<1",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8",
@@ -45,6 +60,28 @@ dev = [
     "pytest-cov>=7.1.0",
     "pandas-stubs>=3.0.5.260730",
 ]
+
+[tool.uv]
+# uni2ts 2.0.0 (Moirai) and its gluonts/datasets pins, and nixtla (TimeGPT),
+# declare upper bounds (numpy<2, scipy~=1.11, torch<2.5, pandas<3) that are
+# stale relative to what they import, and that contradict volbench's own
+# floors. Overrides replace those declarations at resolution time; runtime
+# compatibility under the overridden versions is what the tsfm-marked tests
+# establish on the GPU box.
+override-dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.17.1",
+    "pandas>=3.0.5",
+    "torch==2.5.1",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu121", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
@@ -74,6 +111,35 @@ strict = true
 # would make that file assert nothing at type-check time.
 files = ["src", "tests/test_model_interface.py"]
 
+# The TSFM backends are optional (extra "tsfm") and absent in CI; the adapters
+# import them lazily inside functions. Treat them as untyped whether or not
+# they are installed, so mypy's verdict does not depend on which extras the
+# machine happens to carry.
+[[tool.mypy.overrides]]
+module = [
+    "chronos",
+    "chronos.*",
+    "huggingface_hub",
+    "huggingface_hub.*",
+    "nixtla",
+    "nixtla.*",
+    "timesfm",
+    "timesfm.*",
+    "torch",
+    "torch.*",
+    "transformers",
+    "transformers.*",
+    "uni2ts",
+    "uni2ts.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Gated in tests/conftest.py: both skip by default and always under CI.
+markers = [
+    "tsfm: needs foundation-model weights (and ideally a GPU); opt in with VOLBENCH_RUN_TSFM=1",
+    "timegpt: calls the TimeGPT API; runs only when NIXTLA_API_KEY is set",
+]
