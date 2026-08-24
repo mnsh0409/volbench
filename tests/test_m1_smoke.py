@@ -36,12 +36,19 @@ import pandas as pd
 import pytest
 
 from volbench.benchmarks.make_toy_asset import DEFAULT_PATH, simulate_ohlc
-from volbench.benchmarks.toy import ASSET_ID, WINDOW, ToyBenchmarkResult, models, run_toy_benchmark
+from volbench.benchmarks.toy import (
+    ASSET_ID,
+    WINDOW,
+    ToyBenchmarkResult,
+    ToySeries,
+    models,
+    run_toy_benchmark,
+)
 from volbench.results import ResultsStore
 
 RUNTIME_BUDGET_SECONDS = 120.0
 EXPECTED_ORIGINS = 200
-EXPECTED_MODELS = 4
+EXPECTED_MODELS = 5  # M1's four baselines plus the Student-t GARCH added at M2
 
 
 @dataclass(frozen=True, eq=False)
@@ -194,44 +201,53 @@ class TestLeakageCanary:
     """
 
     @staticmethod
-    def _run(returns: np.ndarray, proxy: np.ndarray) -> pd.DataFrame:
-        from volbench.benchmarks.toy import ASSET_ID, HORIZON, PROXY_NAME, SEED, STEP
+    def _run(toy: ToySeries) -> pd.DataFrame:
+        from volbench.benchmarks.toy import ASSET_ID, HORIZON, SEED, STEP
         from volbench.evaluate import run_backtest
         from volbench.splitter import RollingOriginSplitter
 
         splitter = RollingOriginSplitter(
             window=WINDOW, horizon=HORIZON, step=STEP, refit_every=1
         )
-        frames = [
-            run_backtest(
-                entry.factory,
-                returns,
-                proxy,
-                splitter,
-                SEED,
-                asset=ASSET_ID,
-                proxy_name=PROXY_NAME,
-                fit_series=proxy if entry.fits_on_variance else None,
-            ).assign(label=entry.label)
-            for entry in models()
-        ]
+        frames = []
+        for entry in models():
+            returns, proxy, fit_series = toy.inputs_for(entry)
+            frames.append(
+                run_backtest(
+                    entry.factory,
+                    returns,
+                    proxy,
+                    splitter,
+                    SEED,
+                    asset=ASSET_ID,
+                    proxy_name=entry.target,
+                    fit_series=fit_series,
+                ).assign(label=entry.label)
+            )
         return pd.concat(frames, ignore_index=True)
+
+    @staticmethod
+    def _corrupted(toy: ToySeries, start: int, stop: int | None, seed: int) -> ToySeries:
+        """Replace positions ``start:stop`` of every series with noise."""
+        rng = np.random.default_rng(seed)
+        returns = toy.returns.copy()
+        n = returns.iloc[start:stop].size
+        returns.iloc[start:stop] = rng.normal(0.0, 0.5, size=n)
+        targets = {}
+        for name, target in toy.targets.items():
+            corrupted = target.copy()
+            corrupted.iloc[start:stop] = np.exp(rng.normal(0.0, 1.0, size=n))
+            targets[name] = corrupted
+        return ToySeries(returns=returns, targets=targets)
 
     def test_future_corruption_cannot_change_past_forecasts(self) -> None:
         from volbench.benchmarks.toy import load_series
 
-        returns, proxy = load_series()
+        toy = load_series()
         cutoff = WINDOW + 50  # deep enough in that ~50 origins are fully clean
 
-        corrupted_returns = returns.copy()
-        corrupted_proxy = proxy.copy()
-        rng = np.random.default_rng(999)
-        n_tail = returns.size - (cutoff + 1)
-        corrupted_returns.iloc[cutoff + 1 :] = rng.normal(0.0, 0.5, size=n_tail)
-        corrupted_proxy.iloc[cutoff + 1 :] = np.exp(rng.normal(0.0, 1.0, size=n_tail))
-
-        clean = self._run(returns, proxy)
-        dirty = self._run(corrupted_returns, corrupted_proxy)
+        clean = self._run(toy)
+        dirty = self._run(self._corrupted(toy, cutoff + 1, None, seed=999))
 
         # `config_hash` legitimately differs — the data digest changed — so
         # compare the scored numbers, not the provenance columns.
@@ -250,15 +266,11 @@ class TestLeakageCanary:
         """
         from volbench.benchmarks.toy import load_series
 
-        returns, proxy = load_series()
+        toy = load_series()
         cutoff = WINDOW + 50
 
-        corrupted_returns = returns.copy()
-        rng = np.random.default_rng(1234)
-        corrupted_returns.iloc[: cutoff + 1] = rng.normal(0.0, 0.5, size=cutoff + 1)
-
-        clean = self._run(returns, proxy)
-        dirty = self._run(corrupted_returns, proxy)
+        clean = self._run(toy)
+        dirty = self._run(self._corrupted(toy, 0, cutoff + 1, seed=1234))
 
         clean_past = clean[clean["target_index"] <= cutoff]["crps"].reset_index(drop=True)
         dirty_past = dirty[dirty["target_index"] <= cutoff]["crps"].reset_index(drop=True)

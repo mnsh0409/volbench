@@ -41,12 +41,21 @@
 
 - **Proxies** (`data/proxies.py`) — pure functions, daily units, no hidden
   state: `squared_return`, `parkinson`, `garman_klass`,
-  `realized_variance_from_bars`, and `log_returns`.
+  `realized_variance_from_bars`, `log_returns`, and
+  `overnight_plus_range_variance`.
 
   **Diverged (added at M1):** `log_returns` was not in the plan. The data layer
   exposed only `r^2`, but the models and the evaluator both speak in *signed*
   returns, so every caller was re-deriving them by hand. It returns a leading
   NaN so the output stays index-aligned with its input.
+
+  **Added at M2 (report §4.4, D-016):** `overnight_plus_range_variance` =
+  `(ln(O_t/C_{t-1}))^2 + RS_t`, the per-day CLOSE-TO-CLOSE variance estimator
+  (Rogers & Satchell 1991 range term plus the squared overnight jump).
+  Deliberately not Yang-Zhang, which is windowed and would reach past day `t`.
+  It is HAR's scoring target, since a range proxy alone omits the overnight
+  variance HAR's forecast is scored against. First observation NaN (no
+  `C_{t-1}`).
 
 ### Forecasting — `volbench.dist`, `volbench.models`
 
@@ -118,6 +127,13 @@
   but it means "the model interface" is uniform in *type* and not in *meaning*
   — nothing in the type system distinguishes a returns array from a variance
   array. See `docs/M1_REPORT.md` risk 2.
+
+  **Open (found at M2, docs/M2_NOTES.md):** HAR's lognormal retransformation
+  `E[RV]=exp(ŷ+½·resid_var)` is sensitive to the target's log-space noise. On
+  the toy fixture, feeding HAR the (correct, noisier) overnight-plus-range
+  target inflates its forecast ~13% above the true variance, where the
+  intraday Parkinson target happened to leave it well-calibrated. A bias-
+  corrected or component overnight+intraday HAR is the Phase-2 fix.
 
   **Diverged:** `GARCH.fit` never raises on optimizer failure; it falls back to
   EWMA on the same window and records `fallback=True`. HAR, by contrast, *does*
@@ -242,11 +258,18 @@ Settled after M1 report §4.3 (open at M1, implemented on
 ### Benchmarks — `volbench.benchmarks`
 
 **Added beyond the plan.** `benchmarks/toy.py` composes all three streams over
-a synthetic series: 4 baselines × 200 rolling origins, ~2.3s, byte-identical
-across runs. `benchmarks/make_toy_asset.py` generates its input. `make
-reproduce` rebuilds both from scratch. The series is synthetic because no
-licence in `docs/data_licenses.md` permits vendoring a real one — see
-`docs/M1_REPORT.md`.
+a synthetic series: at M2, **5** baselines (naive, EWMA, GARCH, GARCH-t, HAR) ×
+200 rolling origins, ~5s, byte-identical across runs. Each `ModelEntry` names
+its scoring `target`: HAR is fed and scored on `overnight_plus_range_variance`
+(D-016), the return-fed models on Parkinson. The GARCH-t config exercises the
+parametric `StudentT` path (D-014) under `make reproduce`.
+`benchmarks/make_toy_asset.py` generates the input as independent overnight and
+intraday components summing to a recorded `true_variance` (M2), so estimators
+can be validated against the truth. `make reproduce` rebuilds both from
+scratch. The series is synthetic because no licence in `docs/data_licenses.md`
+permits vendoring a real one — see `docs/M1_REPORT.md`. The M1 byte-identity
+baseline was superseded by the M2 fixture; old `ResultsStore` fragments keep
+their M1 hashes and are never overwritten.
 
 ## Public API surface
 
@@ -306,8 +329,13 @@ the guard, and keeps its own index assertion as a redundant belt.
       "Refit protocol". Still open: per-model refit-schedule overrides.
 - [ ] Multi-horizon: separate `Distribution` per h, or joint object? (`horizon`
       exists in the splitter and in result rows; only h=1 is exercised.)
-- [ ] Should a range/RV proxy feeding HAR be reconciled with the close-to-close
-      return target it is scored against? They are different quantities.
+- [x] Should a range/RV proxy feeding HAR be reconciled with the close-to-close
+      return target it is scored against? **Resolved (D-016):** HAR is fed and
+      scored on `overnight_plus_range_variance`, the close-to-close estimator.
+      Two follow-ups remain open (docs/M2_NOTES.md): HAR's retransformation
+      sensitivity to the target's noise, and whether the return-fed models
+      should also score QLIKE against the close-to-close proxy rather than
+      Parkinson.
 - [ ] TSFM context construction; alignment across calendars.
 - [ ] R interop (rugarch) — subprocess adapter or drop?
 - [ ] A `DataAdapter` protocol, and machine-readable licence metadata that

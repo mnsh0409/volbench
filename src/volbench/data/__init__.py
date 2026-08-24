@@ -17,6 +17,7 @@ from volbench.data.crypto import (
 from volbench.data.proxies import (
     garman_klass,
     log_returns,
+    overnight_plus_range_variance,
     parkinson,
     realized_variance_from_bars,
     squared_return,
@@ -48,6 +49,7 @@ __all__ = [
     "load_ohlc_csv",
     "load_ohlc_parquet",
     "log_returns",
+    "overnight_plus_range_variance",
     "parkinson",
     "realized_variance_from_bars",
     "squared_return",

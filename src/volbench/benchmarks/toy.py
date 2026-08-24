@@ -37,13 +37,21 @@ import numpy as np
 import pandas as pd
 
 from volbench.benchmarks.make_toy_asset import DEFAULT_PATH
-from volbench.data import load_ohlc_csv, log_returns, parkinson
+from volbench.data import load_ohlc_csv, log_returns, overnight_plus_range_variance, parkinson
 from volbench.evaluate import DEFAULT_LEVELS, ModelFactory, Recondition, run_backtest
 from volbench.models import EWMA, GARCH, HAR, NaiveVol
 from volbench.results import ResultsStore
 from volbench.splitter import RollingOriginSplitter
 
-__all__ = ["ModelEntry", "ToyBenchmarkResult", "build_summary", "models", "run_toy_benchmark"]
+__all__ = [
+    "ModelEntry",
+    "ToyBenchmarkResult",
+    "ToySeries",
+    "build_summary",
+    "load_series",
+    "models",
+    "run_toy_benchmark",
+]
 
 #: Trailing observations each model fits on. With 700 usable returns this
 #: leaves exactly 200 origins at step=1, horizon=1.
@@ -52,27 +60,43 @@ HORIZON = 1
 STEP = 1
 SEED = 20260823
 ASSET_ID = "TOY"
+#: Variance target for the return-fed models (naive, EWMA, GARCH): unchanged
+#: since M1, so their numbers stay comparable across the M2 change below.
 PROXY_NAME = "parkinson"
+#: Variance target for range-fed models (HAR): the per-day overnight-plus-
+#: Rogers-Satchell estimator of the *close-to-close* variance, which is the
+#: quantity HAR's forecast is scored on (M1 report §4.4; docs/M2_NOTES.md).
+HAR_TARGET = "overnight_plus_range"
 
 
 @dataclass(frozen=True)
 class ModelEntry:
-    """One model in the benchmark, and which series it fits on.
+    """One model in the benchmark: what it fits on, and what its variance is scored against.
 
     ``fits_on_variance`` is the whole reason this dataclass exists rather than
     a bare list of factories: HAR-RV takes a realized-variance series where
     every other baseline takes returns (models/har.py). ``run_backtest``
     supports that through ``fit_series``, and getting the flag wrong would
     quietly feed a model the wrong units rather than raise.
+
+    ``target`` names the variance series the model is scored against on
+    QLIKE — and, for a range-fed model, also fed as its input, so what it
+    forecasts and what it is scored on are the same quantity.
     """
 
     label: str
     factory: ModelFactory
     fits_on_variance: bool = False
+    target: str = PROXY_NAME
 
 
 def models() -> list[ModelEntry]:
-    """The M1 baseline set (docs/research_design.md models 1, 2, 3, 5).
+    """The toy model set: M1's four baselines plus a Student-t GARCH.
+
+    The Student-t config was added at M2 so that `make reproduce` exercises
+    the parametric ``StudentT`` path that closed M1 report §4.2 (D-014), not
+    only the unit tests. HAR is fed and scored on the overnight-plus-range
+    target (§4.4, D-016); the return-fed models keep Parkinson.
 
     Factories are module-level classes or ``functools.partial`` over them, so
     they stay picklable for the Phase 2 process/Slurm executors — a lambda
@@ -83,7 +107,8 @@ def models() -> list[ModelEntry]:
         ModelEntry("naive", NaiveVol),
         ModelEntry("ewma", functools.partial(EWMA, lambda_=0.94)),
         ModelEntry("garch11", functools.partial(GARCH, o=0, dist="normal")),
-        ModelEntry("har", HAR, fits_on_variance=True),
+        ModelEntry("garch11_t", functools.partial(GARCH, o=0, dist="studentst")),
+        ModelEntry("har", HAR, fits_on_variance=True, target=HAR_TARGET),
     ]
 
 
@@ -97,32 +122,56 @@ class ToyBenchmarkResult:
     config_hashes: dict[str, str]
 
 
-def load_series(path: Path = DEFAULT_PATH) -> tuple[pd.Series, pd.Series]:
-    """Ingest the fixture and return ``(returns, parkinson_variance)``.
+@dataclass(frozen=True, eq=False)
+class ToySeries:
+    """The fixture, ingested: returns plus every variance target, on one calendar.
 
-    Both come back as pandas Series still carrying the fixture's calendar, so
-    that ``run_backtest`` — which aligns its inputs by position — can verify
-    they are on one index rather than take it on trust. The first bar is
-    dropped from *both* because ``log_returns`` has no ``C_{t-1}`` for it —
-    a leading-edge trim of unusable rows, applied identically to every series,
-    which moves no information backwards in time.
+    ``eq=False``: holds pandas objects.
+    """
+
+    returns: pd.Series
+    targets: dict[str, pd.Series]
+
+    def inputs_for(self, entry: ModelEntry) -> tuple[pd.Series, pd.Series, pd.Series | None]:
+        """``(series, proxy, fit_series)`` for ``run_backtest``, per the entry's contract."""
+        proxy = self.targets[entry.target]
+        return self.returns, proxy, (proxy if entry.fits_on_variance else None)
+
+
+def load_series(path: Path = DEFAULT_PATH) -> ToySeries:
+    """Ingest the fixture: log returns and the variance targets, all on one index.
+
+    Everything comes back as pandas Series still carrying the fixture's
+    calendar, so that ``run_backtest`` — which aligns its inputs by position
+    — can verify they are on one index rather than take it on trust. The
+    first bar is dropped from *every* series because ``log_returns`` and the
+    overnight term have no ``C_{t-1}`` for it — a leading-edge trim of
+    unusable rows, applied identically to all, which moves no information
+    backwards in time.
     """
     frame = load_ohlc_csv(path, asset_id=ASSET_ID, source="synthetic")
     return_series = log_returns(frame.close)
-    proxy_series = parkinson(frame.high, frame.low)
+    targets = {
+        PROXY_NAME: parkinson(frame.high, frame.low),
+        HAR_TARGET: overnight_plus_range_variance(frame.open, frame.high, frame.low, frame.close),
+    }
     # Belt to run_backtest's braces: it re-checks the calendars on the way in,
     # but two helpers that fell out of step — one gaining a `dropna()`, say —
     # is a data-layer bug, and this is the data-layer side of the seam.
-    if not return_series.index.equals(proxy_series.index):
-        raise ValueError("returns and proxy are not on the same calendar")
+    for name, target in targets.items():
+        if not return_series.index.equals(target.index):
+            raise ValueError(f"returns and {name} are not on the same calendar")
     returns = return_series.iloc[1:]
-    proxy = proxy_series.iloc[1:]
     if not np.isfinite(returns.to_numpy(dtype=np.float64)).all():
         raise ValueError("returns contain non-finite values after the leading trim")
-    proxy_values = proxy.to_numpy(dtype=np.float64)
-    if not (np.isfinite(proxy_values) & (proxy_values > 0.0)).all():
-        raise ValueError("parkinson proxy must be finite and strictly positive")
-    return returns, proxy
+    trimmed: dict[str, pd.Series] = {}
+    for name, target in targets.items():
+        series = target.iloc[1:]
+        values = series.to_numpy(dtype=np.float64)
+        if not (np.isfinite(values) & (values > 0.0)).all():
+            raise ValueError(f"{name} target must be finite and strictly positive")
+        trimmed[name] = series
+    return ToySeries(returns=returns, targets=trimmed)
 
 
 def run_toy_benchmark(
@@ -155,7 +204,7 @@ def run_toy_benchmark(
         behaviour, kept as an explicit ablation arm. The ``conditioned_
         through`` column records which happened on every row.
     """
-    returns, proxy = load_series(fixture)
+    toy = load_series(fixture)
     splitter = RollingOriginSplitter(
         window=window, horizon=HORIZON, step=STEP, refit_every=refit_every
     )
@@ -164,6 +213,7 @@ def run_toy_benchmark(
     frames: list[pd.DataFrame] = []
     hashes: dict[str, str] = {}
     for entry in models():
+        returns, proxy, fit_series = toy.inputs_for(entry)
         frame = run_backtest(
             entry.factory,
             returns,
@@ -171,9 +221,9 @@ def run_toy_benchmark(
             splitter,
             seed,
             asset=ASSET_ID,
-            proxy_name=PROXY_NAME,
+            proxy_name=entry.target,
             data_spec={"fixture": fixture.name, "generator": "volbench.benchmarks.make_toy_asset"},
-            fit_series=proxy if entry.fits_on_variance else None,
+            fit_series=fit_series,
             levels=levels,
             store=store,
             recondition=recondition,
@@ -187,7 +237,7 @@ def run_toy_benchmark(
 
     results = pd.concat(frames, ignore_index=True)
     summary = build_summary(results, levels=tuple(float(x) for x in levels))
-    n_origins = int(splitter.n_splits(returns.size))
+    n_origins = int(splitter.n_splits(toy.returns.size))
 
     if out_dir is not None:
         out = Path(out_dir)
@@ -219,6 +269,7 @@ def build_summary(
         row: dict[str, Any] = {
             "label": str(label),
             "model": str(group["model"].iloc[0]),
+            "target": str(group["proxy_name"].iloc[0]),
             "n": len(group),
             "n_scored": int(group["crps"].notna().sum()),
             "crps": float(group["crps"].mean()),

@@ -35,11 +35,11 @@ from numpy.typing import NDArray
 from volbench.benchmarks.toy import (
     ASSET_ID,
     HORIZON,
-    PROXY_NAME,
     SEED,
     STEP,
     WINDOW,
     ModelEntry,
+    ToySeries,
     load_series,
     models,
     run_toy_benchmark,
@@ -51,14 +51,17 @@ from volbench.splitter import RollingOriginSplitter
 
 N_ORIGINS = 200
 
-#: The toy benchmark's experiment identities at v0.1.0-m1 (refit_every=1).
-#: They may change only with a deliberate version or protocol change — never
-#: as a side effect of adding a setting that does not bind.
-M1_CONFIG_HASHES = {
-    "ewma": "6d376b0764a08824bb81b362dbc220eb2680850236c5c96301388c96dd60efb8",
-    "garch11": "6d0f428a5320a150c16aca2b13947ff13dc3320189f0866cfd22efc563584a88",
-    "har": "3545272d53d44086288bfcc251445b1f0c63a1c2bf34fcb71b20494598c142ba",
-    "naive": "a6d2890746be6d05fecaa9034fde0075d9327414e1663d154c98591326bf4b73",
+#: The toy benchmark's experiment identities on the committed M2 fixture
+#: (refit_every=1). They may change only with a deliberate version, protocol,
+#: fixture or target change — never as a side effect of adding a setting that
+#: does not bind. Updated at M2: new fixture (independent overnight/intraday
+#: components, docs/M2_NOTES.md), the garch11_t config, and HAR's target.
+PINNED_CONFIG_HASHES = {
+    "ewma": "6fc67693400287d53b526823d5f211b5dddb08051e6011d58cfe0d6f14879928",
+    "garch11": "a2d8353f0585d51f2f7f2dd310c294de3ddb49440a7edc92d56341f2695dabd2",
+    "garch11_t": "f26765e8fd4efd8a8a4e447f0521319a2de3db8c37612122ab84a4d983b14bf8",
+    "har": "31c4b2f897c121bc88c0105255bb17050a65d526a6e25edac2771f341bffcef4",
+    "naive": "c62be2c24ffe857c1725f98c098400342c8c57defc00e7b46a668d804e913bf9",
 }
 
 
@@ -149,9 +152,9 @@ def toy_backtest(
     *,
     refit_every: int,
     recondition: Recondition = "daily",
-    series: tuple[pd.Series, pd.Series] | None = None,
+    toy: ToySeries | None = None,
 ) -> pd.DataFrame:
-    returns, proxy = load_series() if series is None else series
+    returns, proxy, fit_series = (load_series() if toy is None else toy).inputs_for(entry)
     splitter = RollingOriginSplitter(
         window=WINDOW, horizon=HORIZON, step=STEP, refit_every=refit_every
     )
@@ -162,8 +165,8 @@ def toy_backtest(
         splitter,
         SEED,
         asset=ASSET_ID,
-        proxy_name=PROXY_NAME,
-        fit_series=proxy if entry.fits_on_variance else None,
+        proxy_name=entry.target,
+        fit_series=fit_series,
         recondition=recondition,
     )
 
@@ -256,13 +259,13 @@ class TestEquivalenceAtRefitEveryOne:
     same parquet bytes. (The gate additionally checks the bytes against a
     fresh run of the pre-change code; see the commit message.)"""
 
-    def test_daily_and_none_are_byte_identical_and_keep_the_m1_hashes(
+    def test_daily_and_none_are_byte_identical_and_keep_the_pinned_hashes(
         self, tmp_path: Path
     ) -> None:
         daily = run_toy_benchmark(out_dir=tmp_path / "daily", refit_every=1, recondition="daily")
         frozen = run_toy_benchmark(out_dir=tmp_path / "none", refit_every=1, recondition="none")
 
-        assert daily.config_hashes == frozen.config_hashes == M1_CONFIG_HASHES
+        assert daily.config_hashes == frozen.config_hashes == PINNED_CONFIG_HASHES
         for label, digest in daily.config_hashes.items():
             a = (tmp_path / "daily" / f"{digest}.parquet").read_bytes()
             b = (tmp_path / "none" / f"{digest}.parquet").read_bytes()
@@ -270,7 +273,7 @@ class TestEquivalenceAtRefitEveryOne:
         pd.testing.assert_frame_equal(daily.results, frozen.results)
 
     def test_the_setting_is_not_recorded_when_it_cannot_bind(self) -> None:
-        entry = models()[1]  # ewma
+        entry = next(e for e in models() if e.label == "ewma")
         one = toy_backtest(entry, entry.factory(), refit_every=1, recondition="none")
         assert "protocol" not in one.attrs["config"]
         many = toy_backtest(entry, entry.factory(), refit_every=21, recondition="none")
@@ -301,7 +304,7 @@ class TestFrozenArm:
         pd.testing.assert_frame_equal(scores(frozen), scores(legacy))
 
     def test_daily_and_none_differ_at_refit_every_21(self) -> None:
-        entry = models()[2]  # garch11
+        entry = next(e for e in models() if e.label == "garch11")
         daily = toy_backtest(entry, entry.factory(), refit_every=21, recondition="daily")
         frozen = toy_backtest(entry, entry.factory(), refit_every=21, recondition="none")
         assert daily.attrs["config_hash"] != frozen.attrs["config_hash"]
@@ -335,17 +338,24 @@ class TestLeakageCanaryUnderDailyReconditioning:
     def test_future_corruption_cannot_change_reconditioned_past_forecasts(
         self, entry: ModelEntry
     ) -> None:
-        returns, proxy = load_series()
+        toy = load_series()
         cutoff = WINDOW + 60  # three refit blocks, 58 re-conditioned origins, all clean
         rng = np.random.default_rng(99)
-        n_tail = returns.size - (cutoff + 1)
-        bad_returns, bad_proxy = returns.copy(), proxy.copy()
+        n_tail = toy.returns.size - (cutoff + 1)
+        bad_returns = toy.returns.copy()
         bad_returns.iloc[cutoff + 1 :] = rng.normal(0.0, 0.5, size=n_tail)
-        bad_proxy.iloc[cutoff + 1 :] = np.exp(rng.normal(0.0, 1.0, size=n_tail))
+        bad_targets = {}
+        for name, target in toy.targets.items():
+            corrupted = target.copy()
+            corrupted.iloc[cutoff + 1 :] = np.exp(rng.normal(0.0, 1.0, size=n_tail))
+            bad_targets[name] = corrupted
 
-        clean = toy_backtest(entry, entry.factory(), refit_every=21)
+        clean = toy_backtest(entry, entry.factory(), refit_every=21, toy=toy)
         dirty = toy_backtest(
-            entry, entry.factory(), refit_every=21, series=(bad_returns, bad_proxy)
+            entry,
+            entry.factory(),
+            refit_every=21,
+            toy=ToySeries(returns=bad_returns, targets=bad_targets),
         )
 
         before = clean[clean["target_index"] <= cutoff]
