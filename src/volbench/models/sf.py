@@ -67,6 +67,16 @@ Verified behaviourally, not just by reading: ``forward`` on the fit's own
 window reproduces the fitted forecast exactly, a shifted window moves it, and
 the fitted object is not mutated (``tests/test_models_sf.py::TestUpdate``).
 
+A modelling note that follows from ``forward``'s semantics and is worth
+stating rather than discovering later: re-conditioning re-runs the filter over
+the *whole* new window starting from the initial state estimated at the last
+scheduled fit — the state is not carried forward from where the previous
+window ended. That is what R's ``ets(y, model=fit)`` and ``Arima(x,
+model=fit)`` do, it reads nothing later than the origin, and at the window
+lengths this package backtests on (500 observations) the state has long
+converged, so the initialization is immaterial. It would not be for a model
+with a near-zero smoothing parameter on a short window.
+
 One wrinkle, handled: ``forward_ets`` *recomputes* the innovation variance
 ``sigma2`` from the window it is handed (it is derived from that window's
 residuals), whereas ``arima2`` restores the fit's. Re-estimating a scale
