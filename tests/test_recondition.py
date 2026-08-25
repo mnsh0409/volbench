@@ -57,18 +57,22 @@ N_ORIGINS = 200
 #: fixture or target change — never as a side effect of adding a setting that
 #: does not bind. History: updated at the shared-target change (m2/cleanup
 #: item 1), at the 0.2.0 version bump (item 3 — package_version is in every
-#: hash), and at the 0.3.0 Phase-2 core integration (D-017: all eight moved
-#: with the version; autoets / autoarima / lgbm are new — the classical
-#: log-RV models joined the toy benchmark, D-019).
+#: hash), at the 0.3.0 Phase-2 core integration (D-021: all eight moved with
+#: the version; autoets / autoarima / lgbm are new — the classical log-RV
+#: models joined the toy benchmark, D-023), and at 0.4.0, where two things
+#: moved them at once: the version again, and D-018's invalid-target policy,
+#: which the four variance-fed cells now carry in ``protocol``. The *numbers*
+#: did not move at 0.4.0 — the fixture has no invalid day for compaction to
+#: drop, and ``tests/test_compaction.py`` pins that equivalence directly.
 PINNED_CONFIG_HASHES = {
-    "autoarima": "e26f67ea7e681f3aba7f60c273fb8092b23139c97987243b5c0cb3894a6a7ecd",
-    "autoets": "74904119f889e35d4c616cc1297577525b0900aa5f4a8ccfa49ec48ab35e7e2f",
-    "ewma": "a3b64eefffbacc95ce86c0bd8139854c35a39c712e94876188df9215e8542214",
-    "garch11": "c8a59b3a3ebd5274e5f7953fd66471bf3700cf73080bedcf9dc22a84f8def3a9",
-    "garch11_t": "0fd9610c3349a6a22665ed8f39c2e58f515b5b96addbd5a5fba21e4662e816a7",
-    "har": "96d1222c2141091e6c2c1a9d119f6a7106f8cc833ef172f2b45c73aa8c793f58",
-    "lgbm": "57e89612d4cc1fdc775a6c4deab218088662102dd95c4d974a846763aeeb8da0",
-    "naive": "7b41390aba8eeebb2f34af32c82c3776607958b6d1d73c197d5a0e0fa6283cd7",
+    "autoarima": "b9ec1db025462eb6202e0fb1488cdd9c52245cafcc07511ada7c8c510da75a3e",
+    "autoets": "48eb039009a4cb621916b054392f2a9d067f68068ae808c73bec0318035348aa",
+    "ewma": "8c4fe2600b3be649d316b1d5bf3c6b87f8c89b59acc901fe76b90df83514cb0f",
+    "garch11": "508a70e07157f34dba2fbcf517952390ceacd17a33d206a49df434c0f78b37a0",
+    "garch11_t": "50ae49775f78a3d6e59b4e5f0f46a39de55244680bd698aeb9e6e733c1dfcfe9",
+    "har": "d793f8ce3f272cc564f942ae735f1b01d35db5c8c3665cbfa473eb6d080c0427",
+    "lgbm": "4edaa744169d7774f228de84113f3ac393848c024e4c805684110ec20c9fd838",
+    "naive": "109e1f8ffeecb24d42ca39e3487056f3e5d3ea1bd7b16347e1b422cd0062efa1",
 }
 
 

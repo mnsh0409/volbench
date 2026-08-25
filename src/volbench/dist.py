@@ -25,6 +25,28 @@ __all__ = ["Distribution", "Empirical", "Normal", "QuantileGrid", "StudentT"]
 _SQRT2 = math.sqrt(2.0)
 _INV_SQRT_PI = 1.0 / math.sqrt(math.pi)
 
+#: Gauss-Legendre nodes for the generic expected-shortfall quadrature.
+_ES_NODES = 128
+
+
+def _check_level(level: float) -> float:
+    if not 0.0 < level < 1.0:
+        raise ValueError(f"level must lie strictly inside (0, 1), got {level}")
+    return float(level)
+
+
+def _integral_of_piecewise_linear_quantile(
+    knots_u: NDArray[np.float64], knots_q: NDArray[np.float64], level: float
+) -> float:
+    """``∫_0^level Q(u) du`` for ``Q`` linear between knots and flat outside them."""
+    if knots_u.size == 1:
+        return float(knots_q[0]) * level
+    breakpoints = np.concatenate(([0.0], knots_u, [1.0]))
+    values = np.concatenate(([knots_q[0]], knots_q, [knots_q[-1]]))
+    inside = breakpoints[breakpoints < level]
+    grid = np.concatenate((inside, [level]))
+    return float(np.trapezoid(np.interp(grid, breakpoints, values), grid))
+
 
 def _phi(z: float) -> float:
     """Standard normal pdf."""
@@ -137,6 +159,32 @@ class Distribution:
     def sample(self, n: int, seed: int) -> NDArray[np.float64]:
         raise NotImplementedError
 
+    def expected_shortfall(self, level: float) -> float:
+        """Lower-tail expected shortfall ``ES_a = a^{-1} ∫_0^a Q(u) du``.
+
+        The mean of the return *below* its ``level``-quantile, in the same
+        return-side sign convention as :meth:`quantile` and as the
+        ``var_<level>`` result columns: negative in the lower tail.
+
+        It lives here, on the distribution, rather than in the evaluator or
+        the backtests, for the reason :meth:`variance` does — it is a property
+        of the predictive law, so every consumer reads one implementation and
+        the dependency runs one way. :func:`volbench.evaluate.run_backtest`
+        calls it at scoring time to fill the ``es_<level>`` columns, and
+        :func:`volbench.backtests.expected_shortfall` delegates to it; neither
+        of those two modules has to know about the other.
+
+        This base implementation is a generic 128-node Gauss-Legendre
+        quadrature of ``Q(a w²) · 2 a w`` over ``w ∈ (0, 1)``, a substitution
+        that keeps the integrand bounded for finite-mean tails. Every concrete
+        class here overrides it with an exact form.
+        """
+        level = _check_level(level)
+        nodes, weights = np.polynomial.legendre.leggauss(_ES_NODES)
+        w = 0.5 * (nodes + 1.0)  # map (-1, 1) -> (0, 1)
+        integrand = np.array([self.quantile(level * wi * wi) * 2.0 * level * wi for wi in w])
+        return float(np.dot(weights, integrand) * 0.5) / level
+
     def pinball(self, y: float, tau: float) -> float:
         """Quantile (pinball) loss of this forecast's tau-quantile at ``y``."""
         if not 0.0 < tau < 1.0:
@@ -182,6 +230,12 @@ class Normal(Distribution):
     def log_score(self, y: float) -> float:
         z = (y - self.mu) / self.sigma
         return 0.5 * z * z + math.log(self.sigma) + 0.5 * math.log(2.0 * math.pi)
+
+    def expected_shortfall(self, level: float) -> float:
+        """``mu - sigma · phi(z_a) / a`` with ``z_a = Phi^{-1}(a)`` — the Gaussian closed form."""
+        level = _check_level(level)
+        z = float(stats.norm.ppf(level))
+        return self.mu - self.sigma * _phi(z) / level
 
     def sample(self, n: int, seed: int) -> NDArray[np.float64]:
         rng = np.random.default_rng(seed)
@@ -301,6 +355,17 @@ class StudentT(Distribution):
         # Density of the location-scale law: f_df(z) / scale.
         return -(float(stats.t.logpdf(self._z(y), df=self.df)) - math.log(self.scale))
 
+    def expected_shortfall(self, level: float) -> float:
+        """``loc - scale · f_nu(t_a)(nu + t_a²) / ((nu - 1) a)``, the location-scale t form.
+
+        Needs ``df > 1``, which ``__post_init__`` already guarantees: at
+        ``df <= 1`` the tail has no mean and no expected shortfall exists.
+        """
+        level = _check_level(level)
+        t = float(stats.t.ppf(level, df=self.df))
+        density = float(stats.t.pdf(t, df=self.df))
+        return self.loc - self.scale * density * (self.df + t * t) / ((self.df - 1.0) * level)
+
     def sample(self, n: int, seed: int) -> NDArray[np.float64]:
         rng = np.random.default_rng(seed)
         return self.loc + self.scale * rng.standard_t(self.df, size=n)
@@ -340,6 +405,21 @@ class Empirical(Distribution):
         pairwise_sum = float(np.sum((2.0 * idx - n + 1.0) * x))  # sum over i<j of gaps
         term2 = pairwise_sum / (n * n)
         return term1 - term2
+
+    def expected_shortfall(self, level: float) -> float:
+        """Exact for this object's own quantile function.
+
+        ``Empirical.quantile`` is ``np.quantile``'s linear interpolation, i.e.
+        the piecewise-linear function through ``(i/(n-1), x_(i))``, so the
+        integral is taken over exactly those knots rather than over the
+        sample mean of the worst ``a·n`` draws — the two differ at small
+        ``a·n``, and only the first is the ES *of the forecast this object
+        represents*.
+        """
+        level = _check_level(level)
+        samples = np.asarray(self.samples, dtype=np.float64)
+        knots = np.linspace(0.0, 1.0, samples.size) if samples.size > 1 else np.array([0.0])
+        return _integral_of_piecewise_linear_quantile(knots, samples, level) / level
 
     def sample(self, n: int, seed: int) -> NDArray[np.float64]:
         rng = np.random.default_rng(seed)
@@ -382,6 +462,24 @@ class QuantileGrid(Distribution):
         """
         losses = np.array([self.pinball(y, float(t)) for t in self.taus])
         return 2.0 * float(np.trapezoid(losses, self.taus))
+
+    def expected_shortfall(self, level: float) -> float:
+        """Exact for the interpolated law — flat outside the grid, as ``quantile`` is.
+
+        Inherits that flat extrapolation's limitation: below ``min(tau)`` the
+        edge quantile stands in for the whole tail, so a grid that does not
+        reach past ``level`` understates the shortfall. Grids should span the
+        tails they are scored at (docs/P2_INTEGRATION.md §3.1).
+        """
+        level = _check_level(level)
+        return (
+            _integral_of_piecewise_linear_quantile(
+                np.asarray(self.taus, dtype=np.float64),
+                np.asarray(self.values, dtype=np.float64),
+                level,
+            )
+            / level
+        )
 
     def sample(self, n: int, seed: int) -> NDArray[np.float64]:
         rng = np.random.default_rng(seed)

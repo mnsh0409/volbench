@@ -45,6 +45,7 @@ import numpy as np
 import pandas as pd
 
 from volbench.benchmarks.make_toy_asset import DEFAULT_PATH
+from volbench.compaction import DEFAULT_INVALID_TARGET_POLICY, FitSeries
 from volbench.data import load_ohlc_csv, log_returns, overnight_plus_range_variance, parkinson
 from volbench.evaluate import DEFAULT_LEVELS, ModelFactory, Recondition, run_backtest
 from volbench.models import EWMA, GARCH, HAR, AutoARIMARV, AutoETSRV, LightGBMRV, NaiveVol
@@ -171,18 +172,33 @@ class ToySeries:
 
     def inputs_for(
         self, entry: ModelEntry, target: str = SCORING_TARGET
-    ) -> tuple[pd.Series, pd.Series, pd.Series | None]:
+    ) -> tuple[pd.Series, pd.Series, FitSeries | None]:
         """``(series, proxy, fit_series)`` for ``run_backtest``.
 
         ``target`` picks the scoring proxy for the whole cell. The fit input
         of a variance-fed model is always the close-to-close estimator — what
-        the model forecasts is a modelling contract, not an evaluation knob.
+        the model forecasts is a modelling contract, not an evaluation knob —
+        and it is handed over under D-018's invalid-target policy, the same
+        object the panel produces, so ``make reproduce`` exercises the
+        protocol the study runs under rather than a simpler path beside it.
+
+        On this fixture the policy is provably a no-op: ``load_series``
+        refuses a target that is not finite and strictly positive throughout,
+        so there is nothing for compaction to drop and the numbers are those
+        the uncompacted path produces. What it does buy is that the toy cells'
+        config hashes record the policy, and that the compaction code is on
+        the byte-identity gate's path.
         """
         if target not in self.targets:
             raise KeyError(f"unknown target {target!r}; have {sorted(self.targets)}")
         proxy = self.targets[target]
-        fit_series = self.targets[SCORING_TARGET] if entry.fits_on_variance else None
-        return self.returns, proxy, fit_series
+        if not entry.fits_on_variance:
+            return self.returns, proxy, None
+        return (
+            self.returns,
+            proxy,
+            FitSeries.of(self.targets[SCORING_TARGET], policy=DEFAULT_INVALID_TARGET_POLICY),
+        )
 
 
 def load_series(path: Path = DEFAULT_PATH) -> ToySeries:

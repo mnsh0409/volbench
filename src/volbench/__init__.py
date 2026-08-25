@@ -5,7 +5,9 @@ What this root namespace exports, and what it deliberately does not:
 - **exported**: the shared vocabulary every layer speaks in (``Distribution``
   and friends, ``TimeSeriesFrame``, ``Origin``), the sanctioned splitter,
   every model adapter and its fitted type, the pure variance proxies, the
-  evaluation/results/execution entry points, and — since Phase 2 — the
+  evaluation/results/execution entry points, the invalid-target policy
+  (``FitSeries`` and friends) that says what an unusable variance day does to
+  a fit window, and — since Phase 2 — the
   inference (``diebold_mariano``, ``model_confidence_set``,
   ``compare_models``) and VaR-backtest (``kupiec_pof``, ``christoffersen``,
   ``fz0_loss``, ``var_backtest``) entry points that consume the evaluation's
@@ -35,6 +37,14 @@ from volbench.backtests import (
     fz0_loss,
     kupiec_pof,
     var_backtest,
+)
+from volbench.compaction import (
+    DEFAULT_INVALID_TARGET_POLICY,
+    FitSeries,
+    InsufficientHistoryError,
+    InvalidTargetPolicy,
+    invalid_target_mask,
+    valid_target_mask,
 )
 from volbench.data import (
     TimeSeriesFrame,
@@ -111,6 +121,7 @@ from volbench.splitter import Origin, RollingOriginSplitter
 __version__ = package_version()
 
 __all__ = [
+    "DEFAULT_INVALID_TARGET_POLICY",
     "DEFAULT_LEVELS",
     "EWMA",
     "GARCH",
@@ -126,6 +137,7 @@ __all__ = [
     "Distribution",
     "Empirical",
     "Executor",
+    "FitSeries",
     "FittedEWMA",
     "FittedGARCH",
     "FittedHAR",
@@ -136,6 +148,8 @@ __all__ = [
     "FittedStatsForecastRV",
     "FittedTSFM",
     "ForecastModel",
+    "InsufficientHistoryError",
+    "InvalidTargetPolicy",
     "KupiecResult",
     "LightGBMRV",
     "LossMatrix",
@@ -172,6 +186,7 @@ __all__ = [
     "fz0_loss",
     "garman_klass",
     "gjr_garch",
+    "invalid_target_mask",
     "kupiec_pof",
     "log_returns",
     "loss_matrix",
@@ -188,5 +203,6 @@ __all__ = [
     "rogers_satchell",
     "run_backtest",
     "squared_return",
+    "valid_target_mask",
     "var_backtest",
 ]

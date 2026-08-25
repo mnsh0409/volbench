@@ -112,6 +112,20 @@ class _SpyFit:
         return Distribution.from_normal(0.0, max(self.sigma, 1e-12))
 
 
+class ExplodingModel:
+    """Fails at ``fit``, so every row is a failure row with the full schema."""
+
+    @property
+    def name(self) -> str:
+        return "exploding"
+
+    def spec(self) -> dict[str, Any]:
+        return {"kind": "exploding"}
+
+    def fit(self, train: NDArray[np.float64], **ctx: Any) -> Any:
+        raise RuntimeError("this model always fails")
+
+
 class UpdatingModel:
     """A model that re-conditions between refits without re-estimating.
 
@@ -503,7 +517,11 @@ def test_future_data_cannot_touch_earlier_forecasts() -> None:
     poisoned = backtest(SpyModel(), poisoned_returns, poisoned_proxy, splitter)
 
     scored = ["crps", "log_score", "qlike", "forecast_mean", "forecast_var", "realized_return"]
-    scored += [f"{p}_{lv:.10g}".replace(".", "p") for lv in DEFAULT_LEVELS for p in ("var", "hit")]
+    scored += [
+        f"{p}_{lv:.10g}".replace(".", "p")
+        for lv in DEFAULT_LEVELS
+        for p in ("var", "es", "hit")
+    ]
     before = clean.loc[clean["target_index"] <= cutoff, scored].reset_index(drop=True)
     after = poisoned.loc[poisoned["target_index"] <= cutoff, scored].reset_index(drop=True)
 
@@ -884,6 +902,69 @@ def test_levels_are_configurable_and_reach_the_columns_and_the_hash() -> None:
     assert "hit_0p1" in custom.columns
     assert "hit_0p01" not in custom.columns
     assert custom.attrs["config_hash"] != default.attrs["config_hash"]
+    # The tail triple travels together: a level with a VaR column but no ES
+    # column would leave `var_backtest` unable to score FZ0 for that level.
+    assert {"var_0p1", "es_0p1", "hit_0p1"} <= set(custom.columns)
+    assert not any(c.startswith("es_0p01") for c in custom.columns)
+
+
+@pytest.fixture(scope="module")
+def es_frame() -> pd.DataFrame:
+    """One scored cell from a Normal oracle, for the ``es_<level>`` columns."""
+    returns, proxy = simulated_panel(n=400)
+    return backtest(OracleNormal(SIGMA), returns, proxy, make_splitter())
+
+
+class TestExpectedShortfallColumns:
+    """``es_<level>``: the ES the same predictive law implies, beside its VaR."""
+
+    def test_one_es_column_per_var_column(self, es_frame: pd.DataFrame) -> None:
+        for level in DEFAULT_LEVELS:
+            tag = f"{level:.10g}".replace(".", "p")
+            assert f"es_{tag}" in es_frame.columns
+            assert es_frame[f"es_{tag}"].dtype == "float64"
+
+    def test_each_value_is_the_forecasts_own_expected_shortfall(
+        self, es_frame: pd.DataFrame
+    ) -> None:
+        """Recomputed from the recorded moments — the oracle is Normal, so the
+        row's ``forecast_mean``/``forecast_var`` determine the law exactly."""
+        for level in DEFAULT_LEVELS:
+            tag = f"{level:.10g}".replace(".", "p")
+            expected = [
+                Normal(m, math.sqrt(v)).expected_shortfall(level)
+                for m, v in zip(es_frame["forecast_mean"], es_frame["forecast_var"], strict=True)
+            ]
+            np.testing.assert_allclose(es_frame[f"es_{tag}"].to_numpy(), expected, rtol=0, atol=0)
+
+    def test_the_shortfall_sits_below_its_own_var_at_every_level(
+        self, es_frame: pd.DataFrame
+    ) -> None:
+        for level in DEFAULT_LEVELS:
+            tag = f"{level:.10g}".replace(".", "p")
+            assert (es_frame[f"es_{tag}"] <= es_frame[f"var_{tag}"]).all()
+            assert (es_frame[f"es_{tag}"] < 0).all()  # left tail of a zero-mean return
+
+    def test_deeper_levels_have_deeper_shortfalls(self, es_frame: pd.DataFrame) -> None:
+        assert (es_frame["es_0p01"] < es_frame["es_0p025"]).all()
+        assert (es_frame["es_0p025"] < es_frame["es_0p05"]).all()
+
+    def test_it_describes_the_forecast_so_an_unscorable_target_keeps_it(self) -> None:
+        """Same rule as ``var_<level>``: a forecast that was made is a forecast
+        that gets described, whatever happened to the day it was made for."""
+        returns, proxy = simulated_panel(n=400)
+        returns[300] = math.nan
+        frame = backtest(OracleNormal(SIGMA), returns, proxy, make_splitter())
+        row = frame.loc[frame["target_index"] == 300].iloc[0]
+        assert "target_nan" in str(row["missing_reason"])
+        assert math.isnan(float(row["crps"]))
+        assert math.isfinite(float(row["es_0p01"])) and math.isfinite(float(row["var_0p01"]))
+
+    def test_a_row_with_no_forecast_at_all_carries_nan(self) -> None:
+        returns, proxy = simulated_panel(n=400)
+        frame = backtest(ExplodingModel(), returns, proxy, make_splitter())
+        assert frame["es_0p01"].isna().all()
+        assert frame["es_0p01"].dtype == "float64"
 
 
 def test_a_series_too_short_for_the_splitter_is_rejected_by_the_splitter() -> None:

@@ -13,10 +13,13 @@ Three tools (docs/metrics_reference.md, "VaR / ES backtesting"):
   test that combines it with unconditional coverage.
 - :func:`fz0_loss` — the zero-degree-homogeneous Fissler-Ziegel loss in the
   form used by Patton, Ziegel & Chen (2019, eq. 6), to *score and rank*
-  joint (VaR, ES) forecasts rather than only to test them.
-  :func:`expected_shortfall` supplies the ES a
-  :class:`~volbench.dist.Distribution` implies, since result rows carry
-  quantiles but not expected shortfall.
+  joint (VaR, ES) forecasts rather than only to test them. Since v0.4.0
+  result rows carry the ES forecast alongside the VaR quantile
+  (``es_<level>``, written by the evaluator from the predictive
+  distribution), so :func:`var_backtest` scores FZ0 without being handed
+  anything extra; :func:`expected_shortfall` remains available for a
+  :class:`~volbench.dist.Distribution` in hand, and for reading rows
+  produced before that column existed.
 
 Every test result carries ``n`` and ``expected_hits = n * level`` and a
 ``small_sample`` flag; below :data:`MIN_EXPECTED_HITS` expected exceedances
@@ -66,7 +69,7 @@ import pandas as pd
 from numpy.typing import NDArray
 from scipy import special, stats  # type: ignore[import-untyped]
 
-from volbench.dist import Distribution, Empirical, Normal, QuantileGrid, StudentT
+from volbench.dist import Distribution
 from volbench.results import array_digest, config_hash, package_version
 
 __all__ = [
@@ -95,9 +98,6 @@ MIN_EXPECTED_HITS: Final = 10.0
 #: Which result rows :func:`var_backtest` treats as missing; mirrors
 #: :data:`volbench.inference.MissingPolicy`.
 MissingPolicy = Literal["flagged", "score"]
-
-#: Gauss-Legendre nodes for the generic expected-shortfall quadrature.
-_ES_NODES: Final = 128
 
 
 class SmallSampleWarning(UserWarning):
@@ -413,58 +413,31 @@ def fz0_loss(returns: object, var: object, es: object, level: float) -> NDArray[
 # --------------------------------------------------------------------------
 
 
-def _integral_of_piecewise_linear_quantile(
-    knots_u: NDArray[np.float64], knots_q: NDArray[np.float64], level: float
-) -> float:
-    """``∫_0^level Q(u) du`` for ``Q`` linear between knots and flat outside them."""
-    if knots_u.size == 1:
-        return float(knots_q[0]) * level
-    breakpoints = np.concatenate(([0.0], knots_u, [1.0]))
-    values = np.concatenate(([knots_q[0]], knots_q, [knots_q[-1]]))
-    inside = breakpoints[breakpoints < level]
-    grid = np.concatenate((inside, [level]))
-    return float(np.trapezoid(np.interp(grid, breakpoints, values), grid))
-
-
 def expected_shortfall(dist: Distribution, level: float) -> float:
     """Lower-tail expected shortfall ``ES_alpha = alpha^{-1} ∫_0^alpha Q(u) du`` of a forecast.
 
     The mean of the return below its ``alpha``-quantile — the ``e`` that
     :func:`fz0_loss` scores, in the same return-side sign convention as the
-    ``var_<level>`` columns (negative in the lower tail). Result rows do not
-    carry it; compute it from the forecast object at scoring time.
+    ``var_<level>`` columns (negative in the lower tail).
 
-    Closed forms for the parametric families: ``mu - sigma phi(z_alpha)/alpha`` for
-    :class:`~volbench.dist.Normal`, and ``loc - scale · f_nu(t_alpha)(nu + t_alpha²) /
-    ((nu - 1) alpha)`` for :class:`~volbench.dist.StudentT` (needs ``df > 1``).
-    Exact for the piecewise-linear quantile functions of
-    :class:`~volbench.dist.Empirical` (numpy's linear interpolation, the
-    object's own ``quantile``) and :class:`~volbench.dist.QuantileGrid` (flat
-    outside the grid, as its ``quantile`` is). Any other distribution is
-    integrated by 128-node Gauss-Legendre quadrature of ``Q(alpha w²) · 2alphaw`` on
-    ``w ∈ (0, 1)``, a substitution that keeps the integrand bounded for
-    finite-mean tails.
+    Thin wrapper over :meth:`volbench.dist.Distribution.expected_shortfall`,
+    which is where the arithmetic lives: closed forms on
+    :class:`~volbench.dist.Normal` and :class:`~volbench.dist.StudentT`, the
+    exact integral of the piecewise-linear quantile function on
+    :class:`~volbench.dist.Empirical` and
+    :class:`~volbench.dist.QuantileGrid`, and Gauss-Legendre quadrature
+    otherwise.
+
+    It moved there when ``evaluate.py`` began recording ``es_<level>`` columns
+    at scoring time (D-018's sibling change, v0.4.0). Both this module and the
+    evaluator need the same number, and the evaluator must not import the
+    backtests — the dependency runs evaluation → results → distributions, and
+    the backtests read the evaluator's *output*, never the other way round.
+    Putting it on the distribution, next to ``variance`` and ``crps``, is the
+    only placement where neither consumer imports the other. This name stays
+    because it is part of the package's public surface.
     """
-    level = _check_level(level)
-    if isinstance(dist, Normal):
-        z = float(stats.norm.ppf(level))
-        return dist.mu - dist.sigma * float(stats.norm.pdf(z)) / level
-    if isinstance(dist, StudentT):
-        t = float(stats.t.ppf(level, df=dist.df))
-        density = float(stats.t.pdf(t, df=dist.df))
-        return dist.loc - dist.scale * density * (dist.df + t * t) / ((dist.df - 1.0) * level)
-    if isinstance(dist, Empirical):
-        samples = np.asarray(dist.samples, dtype=np.float64)
-        knots = np.linspace(0.0, 1.0, samples.size) if samples.size > 1 else np.array([0.0])
-        return _integral_of_piecewise_linear_quantile(knots, samples, level) / level
-    if isinstance(dist, QuantileGrid):
-        taus = np.asarray(dist.taus, dtype=np.float64)
-        values = np.asarray(dist.values, dtype=np.float64)
-        return _integral_of_piecewise_linear_quantile(taus, values, level) / level
-    nodes, weights = np.polynomial.legendre.leggauss(_ES_NODES)
-    w = 0.5 * (nodes + 1.0)  # map (-1, 1) -> (0, 1)
-    integrand = np.array([dist.quantile(level * wi * wi) * 2.0 * level * wi for wi in w])
-    return float(np.dot(weights, integrand) * 0.5) / level
+    return dist.expected_shortfall(_check_level(level))
 
 
 # --------------------------------------------------------------------------
@@ -484,7 +457,8 @@ class VaRBacktest:
     ``n`` is the number of usable origins, ``n_dropped`` how many were
     excluded (flagged ``missing_reason`` or NaN hit), ``expected_hits = n *
     level``. ``fz0_mean`` is the average FZ0 loss over the ``fz0_n`` origins
-    with an ES forecast, or ``None`` when no ES was supplied.
+    with an ES forecast, or ``None`` when the cell carried no ``es_<level>``
+    column and none was passed.
     """
 
     level: float
@@ -523,16 +497,20 @@ def var_backtest(
 
     ``es`` supplies expected-shortfall forecasts aligned with ``frame``'s
     rows (an array, or the name of a column holding them; see
-    :func:`expected_shortfall`). Without it the FZ0 loss is not computed
-    and ``fz0_mean`` is ``None`` — it is never approximated from the
-    variance, because that would presume a distributional family the row
-    does not record.
+    :func:`expected_shortfall`). Left unset it defaults to the cell's **own**
+    ``es_<level>`` column, which every row scored at v0.4.0 or later carries:
+    that column is this model's ES at this level, computed from the same
+    predictive distribution as ``var_<level>``, so it is the only ES that
+    belongs in an FZ0 loss against these VaRs. On rows produced before the
+    column existed there is nothing to read and ``fz0_mean`` stays ``None``;
+    an ES is never approximated from ``forecast_var``, because that would
+    presume a distributional family the row does not record.
     """
     level = _check_level(level)
     if policy not in ("flagged", "score"):
         raise ValueError(f"policy must be 'flagged' or 'score', got {policy!r}")
     tag = _level_tag(level)
-    hit_col, var_col = f"hit_{tag}", f"var_{tag}"
+    hit_col, var_col, es_col = f"hit_{tag}", f"var_{tag}", f"es_{tag}"
     required = [
         hit_col,
         var_col,
@@ -560,7 +538,13 @@ def var_backtest(
 
     es_values: NDArray[np.float64] | None
     if es is None:
-        es_values = None
+        # The cell's own stored ES, when the run that produced these rows was
+        # new enough to write it. Explicitly not a fallback to anything else.
+        es_values = (
+            np.asarray(frame[es_col].to_numpy(), dtype=np.float64)
+            if es_col in frame.columns
+            else None
+        )
     elif isinstance(es, str):
         if es not in frame.columns:
             raise ValueError(f"es column {es!r} not in frame")
@@ -593,10 +577,16 @@ def var_backtest(
 
     fz0_mean: float | None = None
     fz0_n = 0
+    es_scored: NDArray[np.float64] | None = None
     if es_values is not None:
-        es_ordered = es_values[order]
-        losses = fz0_loss(returns, var, es_ordered, level)
-        losses = np.where(usable, losses, np.nan)
+        # Excluded rows are masked out *before* scoring, not after. A row the
+        # policy already dropped — a failed fit, an unscorable target — can
+        # carry a degenerate ES, and FZ0's domain checks (ES < 0, ES <= VaR)
+        # would otherwise reject the whole cell over a row that contributes
+        # nothing to it. On rows that do count, those checks still fire: an
+        # ES above its own VaR is an incoherent forecast, not a missing one.
+        es_scored = np.where(usable, es_values[order], np.nan)
+        losses = np.where(usable, fz0_loss(returns, var, es_scored, level), np.nan)
         fz0_n = int(np.isfinite(losses).sum())
         fz0_mean = float(np.nanmean(losses)) if fz0_n else math.nan
 
@@ -609,7 +599,7 @@ def var_backtest(
             "hits_sha256": array_digest(hits),
             "returns_sha256": array_digest(returns),
             "var_sha256": array_digest(var),
-            "es_sha256": None if es_values is None else array_digest(es_values[order]),
+            "es_sha256": None if es_scored is None else array_digest(es_scored),
             "package_version": package_version(),
         }
     )

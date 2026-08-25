@@ -15,14 +15,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from volbench.compaction import DEFAULT_INVALID_TARGET_POLICY
 from volbench.data.crisis import CRISIS_WINDOWS
 from volbench.data.diagnostics import crisis_coverage
 from volbench.data.panel import (
     CRYPTO_PANEL,
     DEFAULT_REPAIR_TOLERANCE,
     EQUITY_PANEL,
+    FIT_WINDOW_DEFAULT,
+    FIT_WINDOW_ROBUSTNESS,
     PANEL_END,
     PANEL_START,
+    RETIRED_EQUITY,
     TARGET_NAMES,
     BarQuality,
     EquitySpec,
@@ -30,6 +34,7 @@ from volbench.data.panel import (
     build_equity_series,
     build_targets,
     daily_bars_from_minutes,
+    equity_spec,
     repair_bars,
     resolve_equity_path,
 )
@@ -67,16 +72,22 @@ def _synthetic_rows(n: int, start: str = "2004-11-01") -> list[Row]:
 
 
 class TestPanelSpecs:
-    def test_ten_equity_series_per_d012(self) -> None:
-        assert len(EQUITY_PANEL) == 10
+    def test_nine_equity_series_after_d020_dropped_the_ftse_leg(self) -> None:
+        assert len(EQUITY_PANEL) == 9
         assert set(EQUITY_PANEL) == {
-            "NDX", "DAX", "CAC", "NKX", "HSI", "TWSE", "KOSPI", "SPY", "DIA", "ISF",
+            "NDX", "DAX", "CAC", "NKX", "HSI", "TWSE", "KOSPI", "SPY", "DIA",
         }
 
-    def test_seven_direct_indices_and_three_etf_proxies(self) -> None:
+    def test_the_headline_panel_is_eleven_assets(self) -> None:
+        """D-020's actual claim: 9 equity + 2 crypto, and no ISF anywhere in it."""
+        assert len(EQUITY_PANEL) + len(CRYPTO_PANEL) == 11
+        assert "ISF" not in EQUITY_PANEL
+        assert "ISF" not in CRYPTO_PANEL
+
+    def test_seven_direct_indices_and_two_etf_proxies(self) -> None:
         roles = [spec.role for spec in EQUITY_PANEL.values()]
         assert roles.count("index") == 7
-        assert roles.count("etf_proxy") == 3
+        assert roles.count("etf_proxy") == 2
 
     def test_every_etf_proxy_records_what_it_stands_in_for(self) -> None:
         # D-012 substituted tradable ETFs for the SPX/DJI/FTSE slots Stooq
@@ -88,11 +99,62 @@ class TestPanelSpecs:
             else:
                 assert spec.proxy_for is None
 
+    def test_the_retired_ftse_leg_is_kept_and_still_ingestable(self) -> None:
+        """D-020 dropped ISF from the *panel*, not from the *code*.
+
+        The decision was that a series starting in 2015 cannot contribute to
+        the GFC arm, so it does not belong in a study whose H3 is about crisis
+        sub-samples. Deleting the ability to read the file would have been a
+        different decision, and was not taken: the spec is still here, the
+        lookup still resolves it, and only ``build_panel`` ignores it.
+        """
+        assert set(RETIRED_EQUITY) == {"ISF"}
+        assert RETIRED_EQUITY["ISF"].proxy_for == "FTSE 100"
+        assert equity_spec("ISF") is RETIRED_EQUITY["ISF"]
+        assert equity_spec("NDX") is EQUITY_PANEL["NDX"]
+        with pytest.raises(KeyError, match="unknown equity asset_id"):
+            equity_spec("FTSE")
+
+    def test_the_panel_and_the_retired_map_never_overlap(self) -> None:
+        assert not set(EQUITY_PANEL) & set(RETIRED_EQUITY)
+
     def test_asset_ids_are_their_own_keys(self) -> None:
         for asset_id, spec in EQUITY_PANEL.items():
             assert spec.asset_id == asset_id
         for asset_id, spec in CRYPTO_PANEL.items():
             assert spec.asset_id == asset_id
+
+    def test_the_d019_windows_are_named_here_and_are_what_the_report_uses(self) -> None:
+        """D-019. 500 is the default because at 1000 the GFC arm is mostly
+        warm-up (docs/PANEL_REPORT.md §8.1); 1000 survives as the robustness
+        arm rather than being deleted."""
+        assert FIT_WINDOW_DEFAULT == 500
+        assert FIT_WINDOW_ROBUSTNESS == 1000
+        from volbench.data.build_panel import PROTOCOL_WINDOW, ROBUSTNESS_WINDOW
+
+        assert (PROTOCOL_WINDOW, ROBUSTNESS_WINDOW) == (
+            FIT_WINDOW_DEFAULT,
+            FIT_WINDOW_ROBUSTNESS,
+        )
+
+    def test_both_windows_are_hashed_because_the_splitter_carries_them(self) -> None:
+        """"Both plumbed through run configs, both hashed" needs no new key:
+        ``window`` is a field of the splitter, and the splitter is part of every
+        config. Pinned so a later refactor cannot quietly stop hashing it."""
+        from volbench.results import build_config, config_hash
+
+        def _hash(window: int) -> str:
+            return config_hash(
+                build_config(
+                    model_name="m",
+                    model_spec={},
+                    data_spec={"asset": "A"},
+                    splitter=RollingOriginSplitter(window=window, horizon=1),
+                    seed=1,
+                )
+            )
+
+        assert _hash(FIT_WINDOW_DEFAULT) != _hash(FIT_WINDOW_ROBUSTNESS)
 
     def test_panel_window_matches_d004(self) -> None:
         assert pd.Timestamp("2005-01-01", tz="UTC") == PANEL_START
@@ -257,6 +319,66 @@ class TestBuildTargets:
         targets, _ = build_targets(frame, inconsistent=flag)
         assert len(targets) == len(frame)
         pd.testing.assert_index_equal(targets.index, frame.index)
+
+
+class TestFitInputIsWhereThePolicyLives:
+    """D-018 is enforced at the series-loading layer, not in the adapters.
+
+    ``PanelSeries.fit_input()`` is the one place that decides what a model is
+    allowed to see, so every adapter is covered by one implementation and none
+    of them has to sanitize its own input.
+    """
+
+    def _write(self, root: Path, spec: EquitySpec, rows: list) -> Path:
+        path = root / spec.relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_bulk_text(spec.ticker, rows))
+        return path
+
+    def _series(self, tmp_path: Path) -> PanelSeries:
+        spec = EQUITY_PANEL["NDX"]
+        self._write(tmp_path / "raw", spec, _synthetic_rows(120, start="2004-11-01"))
+        return build_equity_series(
+            "NDX", raw_root=tmp_path / "raw", cache_root=tmp_path / "cache"
+        )
+
+    def test_it_hands_out_the_primary_target_under_the_default_policy(
+        self, tmp_path: Path
+    ) -> None:
+        series = self._series(tmp_path)
+        fit = series.fit_input()
+        assert fit.policy == DEFAULT_INVALID_TARGET_POLICY == "compact"
+        np.testing.assert_array_equal(
+            fit.values, series.primary.to_numpy(dtype=np.float64)
+        )
+
+    def test_it_keeps_the_calendar_so_run_backtest_can_still_check_alignment(
+        self, tmp_path: Path
+    ) -> None:
+        series = self._series(tmp_path)
+        assert series.fit_input().index is not None
+        assert series.index.equals(series.fit_input().index)
+
+    def test_the_uncompacted_arm_is_available_by_name(self, tmp_path: Path) -> None:
+        assert self._series(tmp_path).fit_input(policy="none").policy == "none"
+
+    def test_a_non_target_column_is_refused(self, tmp_path: Path) -> None:
+        with pytest.raises(KeyError, match="unknown target"):
+            self._series(tmp_path).fit_input("yang_zhang")
+
+    def test_the_robustness_proxy_can_be_asked_for_explicitly(self, tmp_path: Path) -> None:
+        """The *default* is the primary target because what a model is fed
+        defines what it forecasts; asking for another one has to be deliberate."""
+        series = self._series(tmp_path)
+        fit = series.fit_input("parkinson")
+        np.testing.assert_array_equal(
+            fit.values, series.targets["parkinson"].to_numpy(dtype=np.float64)
+        )
+
+    def test_invalid_target_days_are_counted_on_the_series(self, tmp_path: Path) -> None:
+        series = self._series(tmp_path)
+        assert series.invalid_target_days == series.fit_input().n_invalid
+        assert series.invalid_target_days == 0  # synthetic bars are all well formed
 
 
 class TestBuildEquitySeries:

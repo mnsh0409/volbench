@@ -287,3 +287,108 @@ class TestArrayFieldHashEq:
         assert q1 == q1
         assert q1 != q2
         assert q1 in {q1}
+
+
+class TestExpectedShortfall:
+    """``Distribution.expected_shortfall`` — the tail mean, on the object.
+
+    It lives here rather than in ``backtests.py`` because two consumers need
+    the same number and neither may import the other: ``evaluate.py`` writes
+    the ``es_<level>`` columns at scoring time, and ``backtests.py`` scores
+    FZ0 from them. ``volbench.backtests.expected_shortfall`` is now a wrapper
+    over these methods, so the arithmetic is tested once, here, and
+    ``tests/test_backtests.py`` keeps testing the loss that consumes it.
+    """
+
+    LEVELS = (0.01, 0.025, 0.05, 0.2)
+
+    @staticmethod
+    def numeric_es(dist: Distribution, level: float) -> float:
+        """``level^-1 ∫_0^level Q(u) du`` by quadrature on the object's own quantiles."""
+        value, _ = integrate.quad(dist.quantile, 0.0, level, limit=200)
+        return float(value) / level
+
+    @pytest.mark.parametrize("level", LEVELS)
+    def test_normal_closed_form_matches_quadrature(self, level: float) -> None:
+        d = Normal(mu=0.001, sigma=0.02)
+        assert d.expected_shortfall(level) == pytest.approx(self.numeric_es(d, level), rel=1e-9)
+
+    @pytest.mark.parametrize("level", LEVELS)
+    def test_student_t_closed_form_matches_quadrature(self, level: float) -> None:
+        d = StudentT(loc=-0.002, scale=0.015, df=5.0)
+        assert d.expected_shortfall(level) == pytest.approx(self.numeric_es(d, level), rel=1e-7)
+
+    def test_the_normal_form_is_the_textbook_one(self) -> None:
+        # ES_a = mu - sigma * phi(z_a) / a for N(mu, sigma^2).
+        d = Normal(mu=0.0, sigma=1.0)
+        z = float(stats_norm_ppf(0.05))
+        expected = -math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi) / 0.05
+        assert d.expected_shortfall(0.05) == pytest.approx(expected, rel=1e-12)
+
+    @staticmethod
+    def trapezoid_es(dist: Distribution, level: float) -> float:
+        """The same integral by a dense trapezoid rule.
+
+        Used for ``Empirical`` and ``QuantileGrid``, whose quantile functions
+        are piecewise linear with hundreds of kinks: adaptive quadrature is
+        the wrong tool there and says so with a roundoff warning.
+        """
+        grid = np.linspace(0.0, level, 200_001)[1:]
+        values = np.array([dist.quantile(float(u)) for u in grid])
+        return float(np.trapezoid(values, grid)) / level
+
+    @pytest.mark.parametrize("level", LEVELS)
+    def test_empirical_and_quantile_grid_integrate_their_own_quantile_function(
+        self, level: float
+    ) -> None:
+        samples = np.linspace(-4.0, 4.0, 501)
+        empirical = Distribution.from_samples(samples)
+        assert empirical.expected_shortfall(level) == pytest.approx(
+            self.trapezoid_es(empirical, level), rel=1e-5
+        )
+        taus = np.linspace(0.005, 0.995, 199)
+        grid = Distribution.from_quantiles(taus, [Normal(0.0, 1.0).quantile(t) for t in taus])
+        assert grid.expected_shortfall(level) == pytest.approx(
+            self.trapezoid_es(grid, level), rel=1e-5
+        )
+
+    def test_the_shortfall_never_exceeds_the_quantile_it_belongs_to(self) -> None:
+        """``ES <= VaR`` is what makes an (VaR, ES) pair coherent, and what
+        ``fz0_loss`` refuses a forecast for violating."""
+        for dist in (
+            Normal(mu=0.0, sigma=0.02),
+            Normal(mu=0.05, sigma=0.01),
+            StudentT(loc=0.0, scale=0.01, df=3.0),
+            Distribution.from_samples(np.linspace(-3.0, 3.0, 200)),
+        ):
+            for level in self.LEVELS:
+                assert dist.expected_shortfall(level) <= dist.quantile(level)
+
+    def test_a_heavier_tail_has_a_deeper_shortfall_at_the_same_variance(self) -> None:
+        gaussian = Normal(mu=0.0, sigma=0.02)
+        heavy = StudentT.from_variance(0.0, gaussian.variance(), df=3.0)
+        assert heavy.variance() == pytest.approx(gaussian.variance())
+        assert heavy.expected_shortfall(0.01) < gaussian.expected_shortfall(0.01)
+
+    def test_the_generic_quadrature_agrees_with_the_closed_forms(self) -> None:
+        """The base-class fallback is what any future Distribution subclass
+        inherits, so it has to be right on the families that can check it."""
+        for dist in (Normal(mu=0.0, sigma=0.02), StudentT(loc=0.0, scale=0.01, df=6.0)):
+            for level in self.LEVELS:
+                generic = Distribution.expected_shortfall(dist, level)
+                assert generic == pytest.approx(dist.expected_shortfall(level), rel=1e-6)
+
+    @pytest.mark.parametrize("level", [0.0, 1.0, -0.1, 1.5])
+    def test_a_level_outside_the_unit_interval_is_refused(self, level: float) -> None:
+        with pytest.raises(ValueError, match="level must lie strictly inside"):
+            Normal(mu=0.0, sigma=1.0).expected_shortfall(level)
+
+    def test_the_backtests_entry_point_delegates_here(self) -> None:
+        from volbench.backtests import expected_shortfall
+
+        d = StudentT(loc=0.0, scale=0.01, df=4.0)
+        assert expected_shortfall(d, 0.025) == d.expected_shortfall(0.025)
+
+
+def stats_norm_ppf(p: float) -> float:
+    return float(math.sqrt(2.0) * special.erfinv(2.0 * p - 1.0))

@@ -38,17 +38,22 @@ from volbench.data.panel import (
     DEFAULT_CACHE_ROOT,
     DEFAULT_RAW_ROOT,
     EQUITY_PANEL,
+    FIT_WINDOW_DEFAULT,
+    FIT_WINDOW_ROBUSTNESS,
     PANEL_END,
     PANEL_START,
+    RETIRED_EQUITY,
     PanelSeries,
     build_panel,
 )
 
 __all__ = ["main", "render_report"]
 
-#: Rolling-origin window from docs/research_design.md, used only to report how
-#: much of each crisis window survives warm-up. Not an evaluation parameter here.
-PROTOCOL_WINDOW = 1000
+#: The rolling-origin windows this report describes: D-019's default and its
+#: robustness arm. Reported, not applied — this module evaluates nothing; the
+#: numbers say how much of each crisis window survives warm-up at each.
+PROTOCOL_WINDOW = FIT_WINDOW_DEFAULT
+ROBUSTNESS_WINDOW = FIT_WINDOW_ROBUSTNESS
 PROTOCOL_MIN_FORECASTS = 1500
 
 #: A series shorter than this fraction of the longest equity series is called
@@ -175,8 +180,8 @@ def _target_table(diagnostics: dict[str, SeriesDiagnostics]) -> pd.DataFrame:
     return pd.DataFrame(rows).T
 
 
-def _crisis_table(panel: dict[str, PanelSeries]) -> pd.DataFrame:
-    coverage = crisis_coverage(panel, window=PROTOCOL_WINDOW)
+def _crisis_table(panel: dict[str, PanelSeries], window: int = PROTOCOL_WINDOW) -> pd.DataFrame:
+    coverage = crisis_coverage(panel, window=window)
     rows = {}
     for asset_id, row in coverage.iterrows():
         cells: dict[str, object] = {
@@ -191,12 +196,33 @@ def _crisis_table(panel: dict[str, PanelSeries]) -> pd.DataFrame:
     return pd.DataFrame(rows).T
 
 
+def _gfc_recovery_table(
+    panel: dict[str, PanelSeries], *, window: int, robustness_window: int
+) -> pd.DataFrame:
+    """What each window costs the two crisis arms that warm-up eats (D-019)."""
+    default = crisis_coverage(panel, window=window)
+    longer = crisis_coverage(panel, window=robustness_window)
+    rows = {}
+    for asset_id in panel:
+        rows[asset_id] = {
+            "GFC in panel": _count(default, asset_id, "gfc_available"),
+            f"GFC scored @{window}": _count(default, asset_id, "gfc_scored"),
+            f"GFC scored @{robustness_window}": _count(longer, asset_id, "gfc_scored"),
+            "COVID in panel": _count(default, asset_id, "covid_available"),
+            f"COVID scored @{window}": _count(default, asset_id, "covid_scored"),
+            f"COVID scored @{robustness_window}": _count(longer, asset_id, "covid_scored"),
+        }
+    return pd.DataFrame(rows).T
+
+
 def render_report(
     panel: dict[str, PanelSeries],
     diagnostics: dict[str, SeriesDiagnostics],
     *,
     raw_root: Path,
     generated_at: str,
+    window: int = PROTOCOL_WINDOW,
+    robustness_window: int = ROBUSTNESS_WINDOW,
 ) -> str:
     equities = {k: v for k, v in diagnostics.items() if v.source == "stooq"}
     crypto = {k: v for k, v in diagnostics.items() if v.source == "binance"}
@@ -219,17 +245,11 @@ def render_report(
         else float("nan")
     )
 
-    coverage = crisis_coverage(panel, window=PROTOCOL_WINDOW)
+    coverage = crisis_coverage(panel, window=window)
     gfc_scored = {
         str(a): (int(r["gfc_scored"]), int(r["gfc_available"]))
         for a, r in coverage.iterrows()
     }
-    worst_gfc = min(
-        (a for a in gfc_scored if gfc_scored[a][1] > 0),
-        key=lambda a: gfc_scored[a][0] / gfc_scored[a][1],
-    )
-    lost_pct = 100 * (1 - gfc_scored[worst_gfc][0] / gfc_scored[worst_gfc][1])
-
     too_short = [
         a
         for a, r in coverage.iterrows()
@@ -237,6 +257,8 @@ def render_report(
     ]
 
     # Values that would otherwise make the prose f-strings below unreadably long.
+    n_equity, n_crypto = len(EQUITY_PANEL), len(CRYPTO_PANEL)
+    n_assets = n_equity + n_crypto
     n_index = sum(1 for spec in EQUITY_PANEL.values() if spec.role == "index")
     n_etf = sum(1 for spec in EQUITY_PANEL.values() if spec.role == "etf_proxy")
     hsi, twse, nkx = diagnostics["HSI"], diagnostics["TWSE"], diagnostics["NKX"]
@@ -267,12 +289,36 @@ def render_report(
     covid_spy = _cov("SPY", "covid")
     tightening_spy = _cov("SPY", "tightening_2022")
     spike_spy = _cov("SPY", "spike_2024_08")
-    isf_scored = _count(coverage, "ISF", "n_scored") if "ISF" in coverage.index else 0
+    smallest_name = str(min(coverage.index, key=lambda a: _count(coverage, str(a), "n_scored")))
+    smallest_scored = _count(coverage, smallest_name, "n_scored")
+    gfc_available_min = min(v[1] for v in gfc_scored.values() if v[1])
+    gfc_available_max = max(v[1] for v in gfc_scored.values())
+    gfc_full = [a for a, v in gfc_scored.items() if v[1] and v[0] == v[1]]
+    gfc_recovered_note = (
+        f"every one of the {len(gfc_full)} series with GFC days in the panel\nnow scores "
+        "all of them"
+        if len(gfc_full) == sum(1 for v in gfc_scored.values() if v[1])
+        else f"{len(gfc_full)} of {sum(1 for v in gfc_scored.values() if v[1])} series score "
+        "their full GFC sample"
+    )
     has_btc = "BTC-USD" in coverage.index
     btc_covid_scored = _count(coverage, "BTC-USD", "covid_scored") if has_btc else 0
-    btc_covid_available = _count(coverage, "BTC-USD", "covid_available") if has_btc else 0
     btc_scored_from = str(coverage.loc["BTC-USD", "scored_from"]) if has_btc else "n/a"
     short_note = "" if not too_short else " EXCEPT " + ", ".join(map(str, too_short))
+    retired_row = (
+        ", ".join(
+            f"{spec.asset_id} ({spec.proxy_for or spec.description})"
+            for spec in RETIRED_EQUITY.values()
+        )
+        or "—"
+    ) + " — D-020"
+    invalid_days = {k: v.invalid_target_days for k, v in panel.items()}
+    invalid_list = (
+        ", ".join(f"{k} ({v})" for k, v in sorted(invalid_days.items(), key=lambda kv: -kv[1]) if v)
+        or "none"
+    )
+    n_invalid_total = sum(invalid_days.values())
+    n_series_with_invalid = sum(1 for v in invalid_days.values() if v)
     equity_targets_row = (
         "`overnight_plus_range` (primary, D-016), `parkinson`, "
         "`garman_klass`, `squared_return`"
@@ -317,26 +363,34 @@ def render_report(
     )
 
     parts: list[str] = []
-    parts.append(f"""# Panel report — D-004/D-012 evaluation panel
+    parts.append(f"""# Panel report — the D-004/D-012/D-020 evaluation panel
 
 > Generated by `uv run python -m volbench.data.build_panel` on {generated_at}.
 > Every figure below is measured by `volbench.data.diagnostics` from the panel
 > that run built; none is hand-entered. Regenerating against the same archives
 > reproduces this file.
 >
-> **Nothing in this report has been acted on.** It is the review gate the panel
-> task was asked to produce, and §9 lists the decisions it needs before any
-> grid run consumes the panel.
+> **This edition is post-decision.** The first edition (2026-08-24) was a
+> review gate whose §9 listed what it could not settle; the three protocol
+> decisions it asked for were taken on `feat/p2-protocol` and are D-018
+> (invalid-target policy), D-019 (a {window}-observation fit window) and D-020
+> (the FTSE 100 slot dropped). The report is regenerated here under those
+> decisions, so every count below is the count the study actually runs with.
+> §9 records what each of them resolved and what remains open.
 
 ## 1. What was built
 
 | | |
 |---|---|
 | panel window | {PANEL_START.date()} → {PANEL_END.date()} (D-004: "2005-01 → freeze date") |
+| headline panel | **{n_assets} assets** ({n_equity} equity + {n_crypto} crypto, D-020) |
 | equity series | {len(EQUITY_PANEL)} ({n_index} indices + {n_etf} ETF proxies, D-012) |
 | crypto series | {len(CRYPTO_PANEL)} (Binance 1-minute → 5-minute RV) |
+| not in the panel | {retired_row} |
 | equity targets | {equity_targets_row} |
 | crypto target | `realized_variance` (5-min RV, D-004) — see §7 |
+| fit window | {window} observations (D-019); {robustness_window} as the robustness arm |
+| unusable days | dropped from fit windows, kept as scored NaN rows (D-018) — see §4 |
 | raw source | hand-downloaded Stooq bulk archives under `{raw_root}` |
 | crypto source | `data.binance.vision` bulk archives (scripted; documented as permitted) |
 
@@ -364,7 +418,7 @@ material block of sessions.
             f"{equities[k].archive_start.date()}, "
             f"{100 * equities[k].n_obs / longest:.0f}% of the longest equity series "
             f"({longest} obs).\n"
-            f"  Under the {PROTOCOL_WINDOW}-observation rolling window it yields "
+            f"  Under the {window}-observation rolling window it yields "
             f"{_count(coverage, k, 'n_scored')} scored forecasts,\n"
             f"  all from {coverage.loc[k, 'scored_from']} onward."
             for k in short
@@ -373,25 +427,38 @@ material block of sessions.
 ### 2.1 D-012 fallback trigger — **FIRED**
 
 {short_lines}
-
-The other two ETF proxies are not short: SPY and DIA both start
-{equities["SPY"].archive_start.date()}, which is the Stooq US archive's own
-beginning, and match the index series observation-for-observation thereafter.
-So the D-012 substitution is only *materially* costly in the FTSE 100 slot.
-
-What this costs, concretely, is stated in §8: **ISF contributes zero GFC
-observations** — the window predates the series by six years — so any
-crisis-regime result for the UK slot rests on COVID, the 2022 tightening, and
-the Aug-2024 spike alone. Whether that is acceptable, or whether the FTSE 100
-slot should be sourced elsewhere (or dropped from the H3 crisis analysis and
-kept for the full-sample comparison), is a decision for the planning machine,
-not for this branch.
 """)
     else:
-        parts.append(
-            "\n### 2.1 D-012 fallback trigger - not fired\n\n"
-            "No equity series is materially short of the longest.\n"
-        )
+        parts.append(f"""
+### 2.1 The FTSE 100 slot — dropped (D-020)
+
+No series in the panel is materially short of the longest: the {len(equities)}
+equity series span {min(d.n_obs for d in equities.values())} to {longest}
+observations, a spread of {100 * min(d.n_obs for d in equities.values()) / longest:.0f}%
+to 100%.
+
+That is a consequence of the decision, not a property of the archives. The
+first edition of this report fired D-012's fallback trigger on **ISF**, the
+iShares Core FTSE 100 ETF and the only instrument available for that slot:
+2899 observations from 2015-03-04, 52% of the longest equity series, and — the
+part that decided it — **zero observations inside the GFC window**, which
+predates the fund by six years. No choice of rolling window recovers a crisis
+that is not in the data. Since H3 is a claim about crisis sub-samples, a series
+that can never contribute to the oldest of them would have been carried through
+every table as a permanent blank, so D-020 drops the FTSE 100 leg and the
+headline panel is {len(EQUITY_PANEL) + len(CRYPTO_PANEL)} assets.
+
+What was *not* thrown away: `ISF` keeps its `EquitySpec` in
+`volbench.data.panel.RETIRED_EQUITY`, `build_equity_series("ISF")` still
+ingests it, and its tests still run. Dropping a series from a study and
+deleting the code that reads it are different things, and only the first was
+decided.
+
+The other two ETF proxies are unaffected: SPY and DIA both start
+{equities["SPY"].archive_start.date()}, which is the Stooq US archive's own
+beginning, and match the index series observation-for-observation thereafter.
+The D-012 substitution was only ever *materially* costly in the FTSE 100 slot.
+""")
 
     parts.append(f"""
 ## 3. Bar-level data quality
@@ -447,14 +514,32 @@ form: e.g. HSI 2024-04-12, `O=H=17095.03`, `L=C=16721.69`, previous close
 `17095.03` — a monotone down day whose open was carried over from the previous
 close.
 
-**Why this is a live problem, not a curiosity.** `HAR.fit` raises on a
-non-positive realized-variance input, and the model takes `log(RV)`. Under a
-{PROTOCOL_WINDOW}-observation rolling window, a *single* zero contaminates the
-{PROTOCOL_WINDOW} training windows that contain it. On HSI's {hsi.zero_primary_days}
-zeros that is up to {hsi_failed_cells} origin-model cells failing —
-they will be emitted as NaN rows with a `missing_reason`, which is the
-evaluator behaving correctly, but it would remove a large share of HSI's HAR
-column without anyone having decided that. §9 lists the options.
+**Why this was a live problem, and what D-018 did about it.** `HAR.fit` raises
+on a non-positive realized-variance input, and every log-RV model takes
+`log(RV)`. Under a {window}-observation rolling window a *single* zero
+contaminates the {window} training windows that contain it, so HSI's
+{hsi.zero_primary_days} zeros alone were up to {hsi_failed_cells} origin-model
+cells emitted as NaN rows — the evaluator behaving correctly, while a large
+share of one series' HAR column quietly disappeared.
+
+D-018 settles it by separating the two roles such a day plays:
+
+- **as a target** it stays exactly where it is. The row is produced, the
+  scores are NaN and `missing_reason` names the cause. Nothing is dropped from
+  the scored table, so no model can look good by being scored on a shorter
+  sample than another. A zero is routed there explicitly now, rather than
+  arriving as a crash: QLIKE is `v/y - log(v/y) - 1`, undefined at `y = 0`.
+- **as a fit input** it is dropped. `volbench.compaction.FitSeries`, which
+  `PanelSeries.fit_input()` hands to `run_backtest`, materializes each window
+  as the last {window} *valid* observations at or before its origin — reaching
+  backwards, never past the origin.
+
+Across the whole panel that is {n_invalid_total} days —
+{invalid_list}.
+The cost is a change in what a lag means (§9), not a change in what is scored:
+an invalid day is still a perfectly good *origin* — its own target is
+unmeasurable, but its history is intact, so the forecast issued at it is a
+normal forecast.
 
 ## 5. Calendar gaps
 
@@ -487,12 +572,12 @@ This was verified independently of the estimator, because a discrepancy that
 large is as likely to be an estimator bug as a fact. Decomposing *realized
 returns* — `Var(ln(O_t/C_(t-1)))` against `Var(ln(C_t/O_t))`, no range
 estimator involved anywhere — gives an overnight share of
-{100 * realized_lo:.0f}-{100 * realized_hi:.0f}% across the ten equity series, against
+{100 * realized_lo:.0f}-{100 * realized_hi:.0f}% across the {n_equity} equity series, against
 {100 * lo_share:.0f}-{100 * hi_share:.0f}% from `overnight_variance`/`rogers_satchell`.
 The largest disagreement on any series is {100 * max_share_gap:.1f} percentage points
 ({max_gap_name}), and `Var(overnight) + Var(intraday)` recovers
 {100 * decomp_lo:.0f}-{100 * decomp_hi:.0f}% of `Var(close-to-close)` on
-{n_decomp_ok} of the ten. So the measurement stands.
+{n_decomp_ok} of the {n_equity}. So the measurement stands.
 
 Both columns are regenerated by `diagnostics.py` on every run
 (`realized_overnight_share` and `decomposition_ratio` in the diagnostics CSV),
@@ -580,79 +665,96 @@ day-level range. That reading is an assumption — see §9.
 ### 8.1 Scored vs. available crisis observations
 
 `scored/available` — how many observations of each window survive the
-{PROTOCOL_WINDOW}-observation rolling-origin warm-up, against how many the panel
+{window}-observation rolling-origin warm-up (D-019), against how many the panel
 contains at all:
 
-{_md_table(_crisis_table(panel))}
+{_md_table(_crisis_table(panel, window))}
 
-**This is the most consequential finding in the report.** The GFC window is
-largely *inside the warm-up period* for every series. The panel contains
-140-149 GFC days per equity series; the evaluation scores
-{gfc_min}-{gfc_max} of them.
-{worst_gfc} loses {lost_pct:.0f}% of its GFC sample to warm-up, and ISF, BTC-USD and
-ETH-USD score none at all.
+**This is what D-019 was for.** The first edition of this report found the GFC
+window largely *inside* the warm-up period: at {robustness_window} observations
+the panel held 140-149 GFC days per equity series and the evaluation scored
+31-86 of them, none at all for the crypto arm's COVID window. At {window} the
+same panel scores **{gfc_min}-{gfc_max}** GFC days per equity series against
+{gfc_available_min}-{gfc_available_max} available:
+{gfc_recovered_note}.
 
-H3 — "TSFM relative performance degrades in crisis sub-samples" — is stated
-over crisis sub-samples generally, and COVID ({covid_spy} on SPY),
-the 2022 tightening ({tightening_spy}) and Aug-2024 ({spike_spy})
-are fully scored, so H3 is testable. But **the GFC arm as currently specified
-is not**, and the Aug-2024 window is only ~22 scored observations per series —
-enough to describe, not enough to run block-bootstrap MCS on per-series.
+The two arms side by side, which is the measurement the decision rests on:
 
-The crypto arm loses COVID the same way: BTC/ETH hold
-{btc_covid_available} COVID observations each but score {btc_covid_scored}, because
-1000 days of warm-up from the 2017 listing runs to {btc_scored_from}. Crypto
-therefore contributes to only two of the four settled windows.
+{_md_table(_gfc_recovery_table(panel, window=window, robustness_window=robustness_window))}
 
-This is a protocol interaction, not a data defect: the panel *has* the GFC
-days. Recovering them requires a decision (§9), not a rebuild.
+So at the default window:
+
+- every equity series scores **{gfc_min}+** GFC observations, against the
+  140-149 the panel contains — the arm is now a real sub-sample rather than
+  a remnant;
+- the crypto arm scores **{btc_covid_scored}** COVID observations per series
+  (it scored 0 at {robustness_window}), because {window} days of warm-up from
+  the 2017 listing runs only to {btc_scored_from};
+- COVID ({covid_spy} on SPY), the 2022 tightening ({tightening_spy}) and
+  Aug-2024 ({spike_spy}) remain fully scored, as they already were.
+
+H3 — "TSFM relative performance degrades in crisis sub-samples" — is therefore
+testable on all four settled windows rather than three. The Aug-2024 window is
+still only ~22 scored observations per series: enough to describe, not enough
+to run block-bootstrap MCS on per-series, and that is a property of a
+one-month window, not of the protocol.
+
+What the shorter window costs is estimation sample, not evaluation sample, and
+it is the reason {robustness_window} survives as the robustness arm rather than
+being deleted: whether a ranking holds at both windows is a question this panel
+can now answer, and both are plumbed through the run configs and enter every
+config hash through the splitter.
 
 Every series clears the ≥{PROTOCOL_MIN_FORECASTS}-forecast minimum from
 `research_design.md`{short_note}
-(smallest: ISF at {isf_scored}).
+(smallest: {smallest_name} at {smallest_scored}).
 
-## 9. Open items — decisions this branch did not have authority to take
+## 9. Open items
+
+### Settled since the first edition
+
+- **Unusable days** (§4) — **D-018**. The first edition recommended NaN-ing the
+  zero-target days so they are excluded from fitting like any other bad bar.
+  What was decided is that recommendation made precise: an invalid target day
+  (primary target NaN *or* ≤ 0) is dropped from every fit window and kept as a
+  scored NaN row. Neither of the alternatives it listed was taken — the target
+  is not floored (that would change the estimator and invent a number nobody
+  measured) and no series is dropped.
+- **The GFC crisis arm** (§8.1) — **D-019**. Resolved by the second of the
+  three options the first edition listed, generalized: the fit window is
+  {window} observations for the whole study rather than for a GFC-specific
+  ablation, with {robustness_window} kept as the robustness arm. D-004's stated
+  span is untouched, so no reopen was needed.
+- **The FTSE 100 slot** (§2.1) — **D-020**. Dropped. The panel is
+  {n_assets} assets; the ingestion code is kept.
+- **`STOOQ_INDEX_SYMBOLS` vs. the panel** — closed earlier, by D-024 (the CFD
+  entries were retired at the Phase-2 core integration).
+
+### Still open
 
 1. **The 1e-5 bar-repair threshold** (§3). Splitting "rounding" from "real
    error" at 1e-5 relative is calibrated on this archive's observed bimodality,
    but it is a modelling choice. Alternatives: NaN *every* violation
-   ({total_inconsistent} more days lost), or
-   clamp them all (silently rewrites a 1.3% error). Recommend keeping the split
-   and recording it as a decision entry.
-2. **HSI's zero-variance days and stale opens** (§4). {hsi.zero_primary_days} zero
-   targets and {hsi_stale_pct:.1f}% stale opens
-   is a source-quality problem specific to one series. Options: (a) let HAR
-   fail those windows and report the NaN rows; (b) NaN the zero-target days so
-   they are excluded from fitting like any other bad bar; (c) floor the target
-   at a small positive value (changes the estimator — needs a D-entry);
-   (d) drop HSI. Recommend (b): it is the same treatment already applied to
-   inconsistent bars, and it is the only option that neither invents a number
-   nor silently deletes a model column.
-3. **The GFC crisis arm** (§8.1). Either accept that GFC is a partial
-   sub-sample and say so in the paper, or shorten the rolling window for a
-   GFC-specific ablation, or extend the panel start before 2005 for the seven
-   index series that have the history (NDX to 1938, NKX to 1914) — the last
-   would change D-004's stated span and needs an explicit reopen.
-4. **The Aug-2024 window's exact dates** (§8), currently read as the calendar
+   ({total_inconsistent} more days lost), or clamp them all (silently rewrites
+   a 1.3% error). Recommend keeping the split and recording it as a decision
+   entry. Note D-018 lowers the stakes: a NaN'd day now costs its own scored
+   row and nothing else, where before it could fail every window containing it.
+2. **Lag semantics under compaction** (§4), new with D-018 and the one thing it
+   costs. For HAR and LightGBM, which read *positional* lags of the fit series,
+   "yesterday" now means the previous *measured* day, so a lag can span two or
+   more calendar days on the {n_series_with_invalid} series that have any.
+   This is documented in those adapters and in
+   `docs/design.md`; whether the paper reports HAR's memory in calendar days or
+   in observations is a presentation decision that has not been taken.
+3. **The Aug-2024 window's exact dates** (§8), currently read as the calendar
    month.
-5. **The ~9-15% overnight-share expectation** (§6) should be corrected wherever
-   it appears in the planning documents; the measured range is 33-51%.
-6. **`docs/design.md` drift.** `volbench.data.proxies` gained two public
-   functions this branch (`overnight_variance`, `rogers_satchell` — the two
-   pieces D-016's target is now literally the sum of), and
-   `volbench.data` gained `panel`, `diagnostics` and `crisis`.
-   `CLAUDE.md` requires a public-API change to update `docs/design.md` in the
-   same PR, but also makes that file a read-only mirror here. **Flagged, not
-   edited**, per the mirror rule. `ManualIngestResult` also gained a `ticker`
-   field and `ingest_manual_csv` an `expect_ticker` guard.
-7. **NKX overnight/intraday correlation** (§6), worth a look before any
+4. **The ~9-15% overnight-share expectation** (§6) should be corrected wherever
+   it appears in the planning documents; the measured range is
+   {100 * lo_share:.0f}-{100 * hi_share:.0f}%.
+5. **NKX overnight/intraday correlation** (§6), worth a look before any
    component model is fitted.
-8. **`STOOQ_INDEX_SYMBOLS` and the panel now disagree about the asset list.**
-   That map still carries `SPX`/`DJI`/`FTSE` pointing at Stooq's unlicensed CFD
-   proxies (`^uslc`, `^usbc`, `^uklc`); D-012 replaced those three slots with
-   SPY/DIA/ISF, which is what `EQUITY_PANEL` encodes. Nothing reads the stale
-   entries on this branch, but two sources of truth for "the panel" is a trap.
-   Recommend retiring the three CFD entries once D-012 is mirrored.
+6. **The 2025-26 stress window** (§8) is still undated, per D-004: it is fixed
+   at grid freeze.
 
 ## 10. Reproducing this report
 
@@ -670,8 +772,11 @@ Neither tree is committed.
     parts.append(f"""
 ## 11. Leakage audit
 
-Run against `.claude/skills/leakage-check` with a calendar/gap focus. Two
-findings, both fixed on this branch; the rest pass.
+Run against `.claude/skills/leakage-check` with a calendar/gap focus, over the
+panel *module* — the code that builds what this report describes. Two findings,
+both fixed when it was written; the rest pass. The audit of the protocol change
+that D-018/D-019/D-020 brought, where compaction is the thing under scrutiny,
+is separate and lives in `docs/P2_INTEGRATION.md` §12.2.
 
 {audit_table}
 
@@ -691,9 +796,11 @@ bit-identical, asserted with `assert_frame_equal`. A companion test corrupts
 from an earlier date and asserts the same comparison *fails*, so the canary
 cannot pass by being inert.
 
-**(10) Survivorship, flagged not fixed.** The ten equity series are instruments
-that exist and are liquid in 2026, chosen in 2026 - SPY/DIA/ISF explicitly
-because they have history reaching back. For *variance* forecasting this is far
+**(10) Survivorship, flagged not fixed.** The {n_equity} equity series are
+instruments that exist and are liquid in 2026, chosen in 2026 - SPY and DIA
+explicitly because they have history reaching back, and the FTSE 100 slot
+dropped (D-020) precisely because its only instrument does not.
+For *variance* forecasting this is far
 weaker than the corresponding bias in a return study, and index-level data
 carries the usual index-reconstitution survivorship regardless of what volbench
 does. It is nonetheless a property of the panel that belongs in the paper's data
@@ -725,6 +832,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip the Binance arm (no network, equities only)",
     )
+    parser.add_argument(
+        "--window",
+        type=int,
+        default=PROTOCOL_WINDOW,
+        help="fit window the crisis-coverage section reports against (D-019 default)",
+    )
+    parser.add_argument(
+        "--robustness-window",
+        type=int,
+        default=ROBUSTNESS_WINDOW,
+        help="the second window §8.1 compares against (D-019 robustness arm)",
+    )
     args = parser.parse_args(argv)
 
     panel = build_panel(
@@ -736,7 +855,12 @@ def main(argv: list[str] | None = None) -> int:
 
     generated_at = datetime.now(tz=UTC).strftime("%Y-%m-%d")
     report = render_report(
-        panel, diagnostics, raw_root=args.raw_root, generated_at=generated_at
+        panel,
+        diagnostics,
+        raw_root=args.raw_root,
+        generated_at=generated_at,
+        window=args.window,
+        robustness_window=args.robustness_window,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(report)

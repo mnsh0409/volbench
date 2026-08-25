@@ -145,7 +145,8 @@ Optional backends in three extras (`classical`, `tsfm`, `torch-cpu`; §4).
   `--extra classical --extra torch-cpu` on every leg.
 - One `[tool.uv]` block (§4); `EXTRAS` variable in the Makefile.
 - Version 0.2.0 → 0.3.0; eight toy identities re-pinned (§7).
-- `docs/decisions.md` D-017..D-021 (provisional numbers); `docs/design.md`
+- `docs/decisions.md` D-021..D-026 (renumbered from the provisional D-017..D-022
+  on `feat/p2-protocol`; see that file's numbering note); `docs/design.md`
   reconciled in one pass — all four streams had flagged its drift.
 
 ## 2. Integration mechanics — what was reconciled and how
@@ -155,7 +156,7 @@ Optional backends in three extras (`classical`, `tsfm`, `torch-cpu`; §4).
 | CI extras | `--extra classical` on every leg | `--extra torch-cpu` on every leg | both, on every leg; `tsfm` never |
 | Makefile | `--extra classical` on every `uv run` | *no* extra: `uv run --extra` syncs to exactly the named extras and would swap the GPU box's cu121 torch out | `EXTRAS ?= --extra classical`, `UV_RUN := uv run $(EXTRAS)`; the GPU box sets `EXTRAS="--extra classical --extra tsfm"` |
 | `[tool.uv]` | `override-dependencies = ["pandas>=3.0.5"]` | numpy/scipy/pandas overrides + `conflicts` + `dependency-metadata` + `sources` + two indexes | one commented block, §4 |
-| `models/__init__` | do **not** re-export sf/lgbm (eager backend imports) | re-export (lazy imports) | re-export everything, lazy everywhere (D-018) |
+| `models/__init__` | do **not** re-export sf/lgbm (eager backend imports) | re-export (lazy imports) | re-export everything, lazy everywhere (D-022) |
 | `uv.lock` | classical additions | tsfm additions (2 815 lines) | tsfm side taken at the merge, regenerated once at the end |
 
 The merge commits carry the union resolution only; every deliberate change
@@ -200,7 +201,7 @@ TestRetransformation::test_the_ensemble_does_not_memorize_its_own_residuals`
 fails if the capacity is raised. The understatement is bounded, not
 eliminated. **Open item: an out-of-fold factor** — estimated on a *temporal*
 fold inside the training window, never a random one — is the honest fix and
-a Phase-2 modelling decision (D-021 revisit-if). Note the same critique
+a Phase-2 modelling decision (D-025 revisit-if). Note the same critique
 applies in principle to PatchTST's training-residual factor; its early
 stopping on a chronological hold-out is a partial mitigation only.
 
@@ -282,7 +283,7 @@ What this means and what was done:
   serve the wrong artefact. The cost is a false miss, not a false hit.
 - Scores are affected at the ~1e-16 level only; no ranking or reported
   number in this report changes. The paper's grid should nonetheless be run
-  on one kernel family and say so (D-022).
+  on one kernel family and say so (D-026).
 
 ## 4. The three uv mechanisms, reconciled
 
@@ -315,7 +316,7 @@ merges added exactly the 8 packages the `classical` extra needs.
 
 ### Classical
 - **Kept its adapters out of `volbench.models`** (eager backend imports)
-  rather than exporting them — reversed at integration (D-018, §6.1).
+  rather than exporting them — reversed at integration (D-022, §6.1).
 - **`SupportsUpdate` implemented** where the brief made it conditional on the
   backend re-filtering at fixed parameters; it can, and one sharp edge was
   handled rather than absorbed: `forward_ets` re-estimates the innovation
@@ -372,7 +373,7 @@ merges added exactly the 8 packages the `classical` extra needs.
 
 ## 6. Cross-stream disagreements surfaced at integration
 
-### 6.1 Export policy — RESOLVED (D-018)
+### 6.1 Export policy — RESOLVED (D-022)
 Classical: "importing them from this package root would make `import
 volbench` fail for anyone who installed the core library". TSFM: lazy
 imports, re-export. Both were right about their own code; the brief's
@@ -388,7 +389,7 @@ extra there would silently swap the GPU box's torch. The `EXTRAS` variable
 is the reconciliation; `make smoke-tsfm` names its extras explicitly because
 they are not negotiable.
 
-### 6.3 Two copies of the RV plumbing — RESOLVED (D-021)
+### 6.3 Two copies of the RV plumbing — RESOLVED (D-025)
 PatchTST re-implemented `validated_rv` and `exp(mu)·factor` locally and
 computed its per-horizon Duan factor in torch. It now uses `_rv`'s
 `validated_rv`, `variance_from_log` and `smearing_factor` (per horizon
@@ -398,7 +399,7 @@ determinism tests still pass on CPU and GPU; `_rv.smearing_factor` drops
 non-finite residuals rather than propagating them, which PatchTST's copy did
 not — a strict improvement for a residual set that should never contain one.
 
-### 6.4 Two asset lists — RESOLVED (D-020)
+### 6.4 Two asset lists — RESOLVED (D-024)
 `STOOQ_INDEX_SYMBOLS` (M1, with SPX/DJI/FTSE → CFD proxies) vs
 `EQUITY_PANEL` (D-012, with SPY/DIA/ISF). The CFD entries are gone; a test
 pins every remaining entry against the panel's ticker. `docs/data_licenses.md`
@@ -475,7 +476,13 @@ here (§3.1's trigger is the real panel).
 
 The brief excludes these from the integration; each ships in a dedicated
 follow-up against the merged tree, with its own D-entry. Listed so they are
-not lost:
+not lost.
+
+> **Items 1-3 are now closed**, on `feat/p2-protocol` at v0.4.0: D-018
+> (invalid-target policy), D-019 (a 500-observation fit window, 1000 as the
+> robustness arm) and D-020 (the FTSE 100 leg dropped; the panel is 11
+> assets). §11 records what shipped and what it cost. Items 4 and 5 are
+> unchanged and still open.
 
 1. **Invalid-target policy.** 14 exactly-zero primary targets (HSI's stale
    opens meeting monotone bars: Rogers-Satchell is exactly zero on a
@@ -602,13 +609,213 @@ run tagged `v0.3.0-p2core`.
 ## 10. Flagged for a human — not resolved here
 
 1. `docs/data_licenses.md` still presents the CFD substitution as an open
-   question; D-012 answered it and D-020 removed the entries. The mirror
+   question; D-012 answered it and D-024 removed the entries. The mirror
    should say so (planning machine).
 2. D-012 is referenced by two streams and by this report but is not in the
-   repo's `docs/decisions.md`; the D-017..D-021 numbers are provisional until
+   repo's `docs/decisions.md`; the D-021..D-026 numbers were provisional until
    the planning machine reconciles.
 3. The paper's PatchTST numbers must state the device class (§3.4).
 4. Survivorship in the panel (§5, data) belongs in the paper's data section.
 5. `make reproduce` now takes ~1 minute longer and needs the `classical`
    extra; a machine without it fails by name rather than recording NaN rows.
    That is intended, but it is a change to what "reproduce" costs.
+
+
+## 11. Follow-up — v0.4.0, the protocol decisions (`feat/p2-protocol`)
+
+The three decisions §8 deferred, plus the ES gap the inference stream flagged,
+shipped as one reviewed change against this merged tree. Recorded here because
+this file is where a reader looks for "what happened after the integration".
+
+### 11.1 What shipped
+
+| | |
+|---|---|
+| **D-018** invalid-target policy | new `volbench.compaction` (`FitSeries`, `InsufficientHistoryError`); `PanelSeries.fit_input()` hands it out; `run_backtest` materializes each window through it |
+| **D-019** fit window | `FIT_WINDOW_DEFAULT = 500`, `FIT_WINDOW_ROBUSTNESS = 1000` in `data/panel.py`; both are ordinary splitter windows, so both were already hashed |
+| **D-020** panel list | `EQUITY_PANEL` is 9 equity series; ISF moves to `RETIRED_EQUITY` and stays ingestable; headline panel 11 assets |
+| **ES columns** | `es_<level>` beside every `var_<level>` in the scored schema; `var_backtest` reads them with no argument |
+| version | 0.3.0 → 0.4.0 |
+
+**Where the ES arithmetic went, and why.** `evaluate.py` must not import
+`backtests.py` — the dependency runs evaluation → results → distributions, and
+the backtests read the evaluator's *output*. Both now need the same number, so
+it went onto the object that owns it:
+`volbench.dist.Distribution.expected_shortfall`, beside `variance` and `crps`,
+with closed forms on `Normal`/`StudentT`, the exact integral of the
+piecewise-linear quantile function on `Empirical`/`QuantileGrid`, and
+Gauss-Legendre quadrature in the base class for anything else.
+`backtests.expected_shortfall` stays as a public wrapper over it. Neither
+consumer imports the other, and there is one implementation rather than two
+that can drift.
+
+`var_backtest(frame, level)` now scores FZ0 without an `es=` argument: the
+column in the row is this cell's own ES at this level, from the same
+distribution as its VaR, so it is the only ES that belongs in that loss. A
+frame written before 0.4.0 has no such column and still backtests, with
+`fz0_mean = None` as before. One related hardening: rows the missing-policy
+already excluded now have their ES masked *before* the loss is evaluated, so a
+degenerate ES on a dropped row can no longer fail FZ0's domain check for the
+whole cell.
+
+### 11.2 Pre-0.4.0 fragments are orphaned, and that is the mechanism working
+
+`package_version` is in every `config_hash`, so **every hash moved at 0.4.0**
+and no fragment written by 0.3.0 or earlier can be served again. That is
+deliberate and it is the same argument as the 0.2.0 → 0.3.0 bump (D-021), only
+stronger here, because two things changed that a stale row could not express:
+
+- the **scored-path schema** gained `es_<level>` columns, so a 0.3.0 fragment
+  is missing columns that 0.4.0 code expects to find;
+- the **protocol semantics** changed: a variance-fed cell's fit windows are now
+  compacted, so a 0.3.0 row for "the same" model and asset was produced from
+  different training data wherever that series has an invalid day.
+
+Orphaned means orphaned, not overwritten: `ResultsStore` fragments are written
+once and never mutated, so the old files simply stop being addressed. Nothing
+deletes them and nothing serves them. A store carried over from 0.3.0 will
+recompute everything on first use, which for the toy benchmark is ~1 minute and
+for a grid run is the whole run — worth knowing before starting one on a
+populated store. The toy benchmark's pinned identities were regenerated once,
+here (`tests/test_recondition.py`); its *numbers* did not move, because the toy
+fixture has no invalid day for compaction to drop, which is asserted directly
+rather than assumed.
+
+### 11.3 Measured — what D-018 is worth on the real archives
+
+HAR over the real HSI and TWSE series, window 500, `refit_every=21`, both arms
+of the policy on the same data:
+
+| series | days | invalid days | policy | origins with a forecast | flagged rows |
+|---|---|---|---|---|---|
+| HSI | 5328 | 13 (12 zero, 1 NaN) | `compact` | **4828 / 4828 (100%)** | 13 |
+| HSI | 5328 | 13 | `none` | 3066 / 4828 (63.5%) | 1765 |
+| TWSE | 5301 | 80 (all NaN) | `compact` | **4801 / 4801 (100%)** | 80 |
+| TWSE | 5301 | 80 | `none` | 2326 / 4801 (48.4%) | 2477 |
+
+Uncompacted, 13 unusable days cost HSI a third of its HAR column and 80 cost
+TWSE more than half — as correctly-recorded NaN rows, which is why it was
+invisible. Compacted, the only unscorable rows are the ones whose *own target*
+is unmeasurable: exactly 13 and 80, and no others.
+
+### 11.4 Gates
+
+Filled in from the runs on `feat/p2-protocol`.
+
+- `ruff check .` and `mypy --strict` — clean on 3.11 / 3.12 / 3.13.
+- Full CPU suite on 3.11 / 3.12 / 3.13.
+- `make reproduce` at 0.4.0: green, and byte-identical against the 0.4.0
+  baseline committed on this branch.
+- tsfm / gpu opt-in suites on the 4090.
+- Leakage check over the full diff, with compaction as the focus.
+- CI on the branch push (the widened trigger covers `feat/**`).
+
+See §12 for the numbers.
+
+
+## 12. Gates and leakage audit for v0.4.0
+
+### 12.1 Local runs
+
+All on this box (RTX 4090, driver 535, torch 2.5.1+cu121 in the 3.11 venv;
+3.12/3.13 venvs built with the CI extras), with the kernel-family pin
+(D-026) exported.
+
+| Leg | Extras | ruff | mypy --strict | pytest |
+|---|---|---|---|---|
+| 3.11 | classical + tsfm | clean | clean, 41 files | **1013 passed, 29 skipped**, 7 m 24 s |
+| 3.12 (`CI=true`) | classical + torch-cpu | clean | clean | **1005 passed, 37 skipped**, 8 m 07 s |
+| 3.13 (`CI=true`) | classical + torch-cpu | clean | clean | **1005 passed, 37 skipped**, 8 m 06 s |
+| 3.11 opt-in (`VOLBENCH_RUN_TSFM=1 VOLBENCH_RUN_GPU=1 -m "tsfm or gpu or timegpt"`) | classical + tsfm | — | — | **29 passed, 1 skipped** (TimeGPT: no `NIXTLA_API_KEY`, by design) |
+
+All three legs collect the same 1042 tests, on the branch tip; the suite grew
+by 82, 43 of them the new `tests/test_compaction.py`. The eight extra skips on
+3.12/3.13 are the two real-archive tests below plus the six that
+`importorskip` the foundation-model backends the `tsfm` extra provides and CI
+never installs.
+
+Two tests do not run in CI at all, by design:
+`test_the_real_panel_series_keep_every_origin` re-checks D-018 on the **real**
+HSI and TWSE archives (1.4 s each) and skips wherever they are not unpacked —
+and always under `CI`, since they are hand-downloaded and never committed. The
+mechanism-faithful fixtures in the same file carry the contract for CI; this
+one keeps §11.3's numbers re-runnable rather than quoted.
+
+`make reproduce` at 0.4.0: green, and the eight fragments **byte-identical**
+across two from-scratch rebuilds (results directory deleted, fixture
+regenerated and diffed clean against the committed CSV). `make smoke-tsfm`
+likewise: four fragments byte-identical across two runs on the 4090.
+
+Fragment identities at 0.4.0 (`tests/test_recondition.py` pins the config
+hashes; the parquet digests are recorded here so a future rebuild can be
+compared without re-deriving them):
+
+```
+autoarima b9ec1db0…0da75a3e   autoets 48eb0390…035348aa   ewma 8c4fe260…3514cb0f
+garch11   508a70e0…f78b37a0   garch11_t 50ae4977…c1dfcfe9  har  d793f8ce…6d080c0427
+lgbm      4edaa744…c20c9fd838 naive   109e1f8f…0062efa1
+smoke-tsfm: chronos 1e09792e…6c30d18  moirai 9ccb5a09…ce07f4e67
+            patchtst d4611f30…eebe8a1e timesfm ed8975f4…5771f23ed
+```
+
+The eight toy scores are unchanged to every printed digit from the 0.3.0 run
+(§7.1), and the four smoke-tsfm scores from §7.2 — only the hashes moved,
+with the version and the recorded policy. That is the expected result and it
+is the point: compaction is a no-op on a fixture with no invalid day, and the
+version bump is what orphans the old fragments.
+
+### 12.2 Leakage check (`.claude/skills/leakage-check`, `main...feat/p2-protocol`)
+
+Run over the full diff (19 files) with compaction as the focus, since it is
+the one thing in this project's history that *rewrites which past
+observations a training window contains*.
+
+| # | Item | Verdict | Where / why |
+|---|---|---|---|
+| 1 | Index arithmetic at boundaries | **PASS** | `compaction.window_positions`: `available = searchsorted(valid_positions, origin, side="right")` counts valid positions `<= origin` (`side="right"` keeps the origin's own observation, which is available at t), then returns `valid_positions[available - n : available]`, whose maximum is therefore `<= origin`. Bounds are validated first: `train` strictly increasing, `positions[0] >= 0`, `origin < size`. `dropped_positions` spans `[kept[0], kept[-1]]`, so every dropped day is `< origin`. Swept over 400+ origins of a doubly-defective series by `test_every_window_ends_at_or_before_its_origin` and `test_every_dropped_day_lies_strictly_in_the_past_of_its_origin`. |
+| 2 | Splitter monopoly | **PASS** (one array worth naming) | `evaluate.py` calls `model.fit(task.fit_series.window(origin.train))` and `fitted.update(task.fit_series.window(origin.train))` — the splitter's own array, passed through; `window_positions` reads only `positions.size` and `positions[-1]`, i.e. exactly the "N observations ending at t" pair the splitter guarantees. The one array that *looks* like index production is `FitSeries.valid_positions = flatnonzero(valid_target_mask(values))`. It is not a train/test index: it is a validity index over the whole series, and it is only ever intersected with "`<= origin`". `test_the_splitter_still_runs_on_the_full_calendar` pins that origins and targets are unchanged by the policy. |
+| 3 | Feature lags | **PASS**, with a documented semantic change | Every value in a materialized window sits at a calendar position `<= origin`. `har._design_matrix`/`_har_features` and `lgbm._design_matrix`/`_feature_row` are untouched and read only the handed array. What changed is what a lag *means*: position `p-1` is the previous **measured** day, so a lag-1 regressor can span two or more calendar days. Documented in both adapters, in `compaction.py`, in `data/panel.py` and in `docs/design.md`; pinned by `test_a_dropped_day_makes_the_lag_span_two_calendar_days`. |
+| 4 | Transforms and scalers | **PASS** | Nothing new is fitted. `valid_target_mask` is a *pointwise* predicate (`isfinite & > 0`), not a statistic estimated from the series, so computing it over the whole array transports no information — and selection is bounded by the origin regardless. `test_validity_of_a_later_day_cannot_change_an_earlier_window` makes every day after an origin invalid and shows that origin's window unchanged. Smearing/Gaussian factors and the TSFM `input_scale` are as before. |
+| 5 | Target construction | **PASS** | `repair_bars` and `build_targets` are untouched; `PanelSeries.fit_input` reads an already-built column. The scored path is unchanged, so day t's target still reads day t's own bar plus day t-1's close. Nothing is forward-filled: an invalid day is dropped from *windows*, never replaced by a neighbour — which is exactly why option (d) was rejected in D-018. |
+| 6 | Refit schedule | **PASS** | Window materialization happens inside the `fit`/`update` it belongs to, so it is bounded by that call's own origin. A short window at a *scheduled* fit fails its whole refit block, the same rule as any other fit failure — never an off-schedule refit, which would report a cadence the run did not use. Pinned by `test_a_short_scheduled_fit_fails_its_whole_block_like_any_other`; structurally this can only bite a series' first block. |
+| 7 | TSFM context windows | **PASS** | `_context_of` still takes the trailing `min(max_context, context_length)` of the handed window, which now ends at the last valid observation `<= origin`. All four zero-shot adapters and PatchTST are `fits_on_variance=True` in `smoke_tsfm`, so they receive the same compacted object as HAR; still one series per forward pass, so no padding or cross-series alignment exists. |
+| 8 | Calendar alignment | **PASS** | `FitSeries` carries the pandas index it was built from precisely so `_require_one_calendar` keeps working: values and order are still checked, an off-calendar fit series still raises, and a *bare-array* `FitSeries` beside indexed inputs is still refused rather than silently aligned by position. Both pinned (`test_a_fit_series_off_calendar_is_still_refused`, `test_a_bare_fit_series_beside_indexed_inputs_is_refused`). No cross-asset join exists anywhere. |
+| 9 | Caching | **PASS** | `array_digest(fit_input.values)` covers the full-calendar values, NaNs included — numpy's canonical quiet NaN, verified identical across the construction paths that produce it. `protocol.invalid_target_policy` is recorded whenever it is not `"none"`, so the two arms cannot share a cache entry (`test_the_two_arms_can_never_share_a_cache_entry`), while a bare array keeps the pre-D-018 identity exactly (`test_a_bare_array_means_no_policy_and_hashes_as_it_always_did`). The 0.4.0 bump moves every hash, so no pre-0.4.0 fragment is served. |
+| 10 | Survivorship & selection | **DESIGN-LEVEL, flagged** | Unchanged in kind, sharper in degree. D-020 removes ISF from the panel using a fact knowable only in 2026 — that the fund launched in 2015. That is selection on *data availability*, not on outcomes, so it cannot bias a forecast comparison; but the panel's composition is now explicitly the product of a 2026 judgement about history length, on top of the SPY/DIA choice §9.2 already flagged. Belongs in the paper's data section, stated plainly. |
+
+**Canary.** Strengthened, not just carried over. `tests/test_compaction.py`
+corrupts (a) every *value* after an origin and (b) every later day's
+*validity* — the subtler case, since compaction reads validity — and asserts
+the window is bit-identical either way, with an inert-proof companion that
+corrupts from *before* the origin and requires the comparison to fail. The
+end-to-end canary in `tests/test_evaluate.py` now also compares the
+`es_<level>` columns, and `tests/test_m1_smoke.py` is unchanged.
+
+**One FIX, applied during the audit.** `run_backtest`'s docstring stated the
+guarantee as "*volbench itself passes a model nothing but
+`fit_series[origin.train]`*", which compaction makes false. Corrected to the
+bound that is actually true — nothing but observations at positions `<=
+origin.origin`, either `fit_series[origin.train]` exactly or the last
+`len(origin.train)` valid ones of them. Documentation rather than behaviour,
+but a stale invariant statement in the one place a reader looks for it is how
+a real invariant gets eroded.
+
+### 12.3 CI
+
+Every push to `feat/p2-protocol` triggered the 3.11/3.12/3.13 matrix under the
+widened trigger (`feat/**`, D-021). All six runs green, first try — no repeat
+of the runner lottery §9.3 records, because the kernel-family pin (D-026) is
+in place:
+
+| commit | run | result |
+|---|---|---|
+| `372070d` docs: renumbering, D-018/019/020 | 32813070672 | **success** |
+| `187f880` test: pickle round trip | 32813202828 | **success** |
+| `21edf5a` fix: read-only copy | 32814295339 | **success** |
+| `1f5ef2b` test: real archives | 32814969884 | **success** |
+| `ba611e7` docs: panel size in prose | 32815140236 | **success** |
+| `11f4455` test: leftover expression | 32815484913 | **success** |
+
+`11f4455` is the branch tip and the tree that merges. Two runs this file
+cannot carry, for the usual reason: the commit that adds this table, and the
+merge commit on `main` — the latter is the run tagged `v0.4.0-protocol`.

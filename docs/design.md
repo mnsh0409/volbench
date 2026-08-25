@@ -1,15 +1,17 @@
 # 04 · volbench API design
 
-> Status: **AS-BUILT at the Phase-2 core integration (v0.3.0-p2core)**. This
+> Status: **AS-BUILT at the protocol follow-up (v0.4.0-protocol)**. This
 > file described the plan until the three Phase 1 streams landed; it now
 > describes what exists, with every place the build diverged from the plan
 > called out inline under **Diverged:**. Updated at M1, at M2
-> (`m2/evaluator-hardening`, `m2/cleanup`) and at the Phase-2 integration of
+> (`m2/evaluator-hardening`, `m2/cleanup`), at the Phase-2 integration of
 > `feat/p2-models-classical`, `feat/p2-models-tsfm`, `feat/p2-inference` and
 > `feat/p2-data-panel` (docs/P2_INTEGRATION.md — all four streams flagged
-> this file's drift; it is reconciled here in one pass). The planning-folder
-> copy is behind this one and needs re-syncing from here, not the other way
-> round.
+> this file's drift; it is reconciled there in one pass), and on
+> `feat/p2-protocol`, which took the three protocol decisions that
+> integration deferred (D-018 invalid targets, D-019 fit window, D-020 the
+> panel list) and closed the ES gap. The planning-folder copy is behind this
+> one and needs re-syncing from here, not the other way round.
 
 ## Components
 
@@ -81,16 +83,36 @@
   above; nothing here re-implements parsing or an estimator.
   - `EQUITY_PANEL` / `CRYPTO_PANEL` (`EquitySpec`, `CryptoSpec`): seven
     indices Stooq still serves (NDX, DAX, CAC, NKX, HSI, TWSE, KOSPI) plus
-    the D-012 ETF stand-ins SPY/DIA/ISF for the SPX/DJI/FTSE-100 slots, and
-    BTC/ETH from Binance minute bars. `PANEL_START`/`PANEL_END` bound the
-    window; `build_equity_series`/`build_crypto_series`/`build_panel`
-    produce `PanelSeries`; `build_targets` the four daily variance targets
-    (`TARGET_NAMES`). Stooq is never fetched programmatically — the equity
-    arm reads hand-downloaded bulk archives under a `raw_root` outside the
-    repo (`tests/test_licensing_guard.py` asks git that the data trees stay
-    untracked). Targets are built on each file's full history and trimmed to
-    the window afterwards, so the first in-window day keeps a genuine
-    previous close (a backward-looking read of data that already existed).
+    the D-012 ETF stand-ins SPY/DIA for the SPX/DJI slots, and BTC/ETH from
+    Binance minute bars — **11 assets** (D-020). `PANEL_START`/`PANEL_END`
+    bound the window; `build_equity_series`/`build_crypto_series`/
+    `build_panel` produce `PanelSeries`; `build_targets` the four daily
+    variance targets (`TARGET_NAMES`). Stooq is never fetched
+    programmatically — the equity arm reads hand-downloaded bulk archives
+    under a `raw_root` outside the repo (`tests/test_licensing_guard.py`
+    asks git that the data trees stay untracked). Targets are built on each
+    file's full history and trimmed to the window afterwards, so the first
+    in-window day keeps a genuine previous close (a backward-looking read of
+    data that already existed).
+  - `RETIRED_EQUITY` / `equity_spec` (D-020): the FTSE-100 slot's ISF is
+    ingestable but not in the panel. It starts 2015-03-04 and so holds no GFC
+    observations at any window, which no protocol choice can fix, so it was
+    dropped from the study — but not from the code: `equity_spec` resolves
+    both maps and `build_equity_series("ISF")` still works. "The panel" is
+    exactly `EQUITY_PANEL`, and `build_panel` iterates only it.
+  - `FIT_WINDOW_DEFAULT = 500` / `FIT_WINDOW_ROBUSTNESS = 1000` (D-019): the
+    study's rolling window and its robustness arm, named here because they
+    are a property of the panel runs. Both are ordinary
+    `RollingOriginSplitter(window=...)` values and therefore already in every
+    `config_hash`; no separate key exists or is needed. At 1000 the GFC arm
+    was mostly warm-up (31-86 of 140-149 days scored per equity series, 0 of
+    90 crypto COVID days); at 500 both are scored in full.
+  - `PanelSeries.fit_input(target=None, *, policy=...)` (D-018): **the seam
+    where the invalid-target policy is enforced**, returning a
+    `volbench.compaction.FitSeries` over the series' primary target (or a
+    named other one), on the panel's own calendar and index. Every adapter is
+    covered by this one implementation; none sanitizes its own input.
+    `PanelSeries.invalid_target_days` counts what it will drop.
   - `repair_bars` / `BarQuality`: a bar must satisfy `low <= min(O,C) <=
     max(O,C) <= high`; sub-1e-5 relative violations (decimal rounding) are
     clamped and counted, larger ones (a close printed outside its own
@@ -108,11 +130,14 @@
     a *report*, leakage in a *feature*; nothing consumes them. `crisis_coverage`
     takes the union of `RollingOriginSplitter`'s own `test` indices rather than
     re-deriving the arithmetic (the audit found the re-derivation off by one).
-  - `build_panel.py` regenerates `docs/PANEL_REPORT.md`; no figure in it is
-    hand-entered. Its findings (ISF starts 2015; the GFC arm is mostly inside
-    the warm-up; the overnight share is 33-51%, not the ~9-15% the toy
-    generator suggested; HSI's zero-variance days) are **decisions still
-    pending**, listed in `docs/P2_INTEGRATION.md` — none is applied here.
+  - `build_panel.py` regenerates `docs/PANEL_REPORT.md` (`--window` /
+    `--robustness-window` select which fit windows §8.1 reports); no figure in
+    it is hand-entered. Three of its findings became decisions on
+    `feat/p2-protocol` — ISF starts 2015 (D-020), the GFC arm is mostly inside
+    the warm-up (D-019), HSI's zero-variance days (D-018) — and the report is
+    regenerated under them. The overnight share being 33-51% rather than the
+    ~9-15% the toy generator suggested is a correction to the *planning*
+    documents and is still outstanding there.
 
   **Diverged:** the plan's `DataAdapter` protocol is still absent; the panel
   is source-shaped composition over source-shaped adapters, which is the
@@ -123,8 +148,20 @@
 - **`Distribution`** (`dist.py`) — the only forecast currency. Constructors
   `from_normal`, `from_student_t`, `from_samples`, `from_quantiles`; concrete
   `Normal`, `StudentT`, `Empirical`, `QuantileGrid`. Methods: `quantile`,
-  `cdf`, `crps`, `log_score`, `pinball`, `sample`, and — parametric families
-  only — `mean`/`variance` in closed form.
+  `cdf`, `crps`, `log_score`, `pinball`, `sample`, `expected_shortfall`, and
+  — parametric families only — `mean`/`variance` in closed form.
+
+  **Added on `feat/p2-protocol`:** `expected_shortfall(level)`, the lower-tail
+  mean `level^-1 ∫_0^level Q(u) du`, in the same return-side sign convention
+  as `quantile` (negative in the lower tail). Closed forms on `Normal` and
+  `StudentT`, the exact integral of the piecewise-linear quantile function on
+  `Empirical` and `QuantileGrid`, 128-node Gauss-Legendre quadrature in the
+  base class for anything else. It lives on the distribution, next to
+  `variance`, because two modules need the same number and neither may import
+  the other: `evaluate.py` writes the `es_<level>` columns at scoring time and
+  `backtests.py` scores FZ0 from them, while the dependency direction is
+  evaluation → results → distributions. `backtests.expected_shortfall` remains
+  as a public wrapper over it.
 
   **Added on `m2/evaluator-hardening`:** `StudentT(loc, scale, df)`, the
   location-scale t with closed-form moments and CRPS (Jordan, Krüger & Lerch
@@ -355,6 +392,59 @@
   than a schedule object. Only rolling (fixed-length) windows exist; expanding
   windows are not implemented.
 
+### Invalid targets — `volbench.compaction`
+
+Added on `feat/p2-protocol` (D-018). An **invalid target day** is a day whose
+primary variance target is NaN or `<= 0`. The panel has 125 of them: 109 from
+bars whose close printed outside their own session range (TWSE 80, CAC 28,
+HSI 1), 14 where a monotone bar met a stale open so that Rogers-Satchell and
+the overnight term are *both* exactly zero (HSI 12, NKX 2), and 2 first-in-
+window days with no previous close (SPY and DIA). Every log-RV
+model takes `log(RV)`, so before this a single such day failed every training
+window containing it — measurably, at window 500 and `refit_every=21`, 36% of
+HSI's origins and 52% of TWSE's.
+
+- **`FitSeries(values, policy, index)`** — the series a model is fitted on,
+  kept on the **full calendar**, plus the policy for its unusable days.
+  `FitSeries.compact(...)` / `.raw(...)` / `.of(..., policy=...)`;
+  `window(train)` materializes one origin's fit input, `window_positions` and
+  `dropped_positions` expose what it did, `n_invalid` counts.
+- **The rule.** Under `policy="compact"`, the window for a splitter `train`
+  array of `N` positions ending at `origin` is the last `N` **valid**
+  observations at positions `<= origin`. Where invalid days sit inside the
+  span, the window's calendar extent stretches further into the past; its last
+  observation never moves past the origin. Under `policy="none"` it is
+  `values[train]`, the pre-D-018 behaviour, kept as an explicit arm.
+- **The splitter is untouched.** Compaction happens when a window is
+  *materialized*, never by reshaping the series the splitter sees, so origins
+  and targets remain calendar positions and *which days are scored does not
+  change*. An invalid day is still a perfectly good origin: its own target is
+  unmeasurable, but its history is intact, so the forecast issued at it is a
+  normal forecast — only the row whose *target* is that day carries a
+  `missing_reason`.
+- **Temporal integrity.** Validity at a position depends on that position's own
+  value alone, and only positions `<= origin` are ever selected, so no future
+  observation — and no future day's *validity* — can change an earlier window.
+  `tests/test_compaction.py` asserts both, with an inert-proof companion.
+- **Too little history is explicit.** Fewer than `N` valid observations at or
+  before an origin raises `InsufficientHistoryError`, which the evaluator turns
+  into the standard NaN-plus-`missing_reason` row. A short window is never
+  silently fitted: the run would then report a window length it did not use.
+  Structurally this can only affect a prefix of a series' origins.
+- **Identity.** The policy enters the config hash under
+  `protocol.invalid_target_policy` whenever it is not `"none"`, so the two arms
+  can never share a cache entry. A bare array means `"none"` and hashes exactly
+  as it did before the key existed.
+
+**The cost, stated because it is real.** For models that read *positional* lags
+of the fit series — HAR's daily/weekly/monthly components, LightGBM's 22 lags —
+"yesterday" now means *the previous measured day*, so on the six affected
+series a lag-1 regressor can span two or more calendar days and the 22-lag
+window more than 22. Imputing the missing variance instead would put a number
+nobody measured into the regressors, which is worse; but any statement about
+these models' memory in calendar time has to say so. Both adapters' docstrings
+carry the caveat, and `tests/test_compaction.py` pins an instance of it.
+
 ### Refit protocol — what "refit every N days" means
 
 Settled after M1 report §4.3 (open at M1, implemented on
@@ -399,12 +489,28 @@ Settled after M1 report §4.3 (open at M1, implemented on
 
 - **`run_backtest(model_factory, series, proxy, splitter, seed, *, asset,
   proxy_name, data_spec=None, fit_series=None, levels=DEFAULT_LEVELS,
-  executor=None, store=None, overwrite=False) -> pd.DataFrame`** — scores one
-  cell. Returns one tidy row per `(origin, horizon)` with the forecast's mean
-  and variance, the realized return, the proxy, CRPS, log score, QLIKE, and
-  pinball/VaR-quantile/hit at each level, plus `config_hash`, `seed`,
+  executor=None, store=None, overwrite=False, recondition="daily") ->
+  pd.DataFrame`** — scores one cell. Returns one tidy row per
+  `(origin, horizon)` with the forecast's mean and variance, the realized
+  return, the proxy, CRPS, log score, QLIKE, and
+  pinball/VaR-quantile/ES/hit at each level, plus `config_hash`, `seed`,
   `fit_origin`, `conditioned_through`, `refit` and `missing_reason`.
   `frame.attrs` carries `config_hash`, `config` and `cached`.
+
+  **Added on `feat/p2-protocol`:** `es_<level>` beside every `var_<level>` —
+  the expected shortfall the same predictive law implies, from
+  `Distribution.expected_shortfall`. Like the VaR quantile it describes the
+  *forecast*, so it is written even where the target is unscorable, and NaN
+  only where no forecast was made at all. `var_backtest` reads it with no
+  argument, which is what makes the FZ0 loss available for every cell rather
+  than only for callers willing to re-assert a distributional family the row
+  does not record. A schema change, hence the 0.4.0 version bump: every
+  `config_hash` moves and no pre-0.4.0 fragment is served again.
+
+  **Also on `feat/p2-protocol`:** `fit_series` accepts a
+  `volbench.compaction.FitSeries` as well as an array or Series, which is how
+  D-018's invalid-target policy reaches the model. A bare input still means
+  `policy="none"` and hashes as it always did.
 
   **Diverged:** the plan had an **`Evaluator`** class consuming
   `(Distribution, realized target)` streams. As built it is a function over a
@@ -512,8 +618,14 @@ missing rather than recording 200 `fit_error` rows. The scoring target is a
 property of the run, never of a model: every cell scores QLIKE against
 `overnight_plus_range_variance` (D-016), with Parkinson available as a labeled
 robustness arm behind the `target` flag; HAR's *fit input* is always the
-overnight-plus-range series regardless of the flag. The GARCH-t config
-exercises the parametric `StudentT` path (D-014) under `make reproduce`.
+overnight-plus-range series regardless of the flag. Since `feat/p2-protocol`
+the variance-fed cells take that input as a `FitSeries` under D-018's default
+policy, so `make reproduce` exercises the protocol the study runs rather than a
+simpler path beside it; on this fixture the policy is provably a no-op
+(`load_series` refuses a target that is not finite and strictly positive
+throughout), so it moved the four cells' hashes and none of their numbers. The
+GARCH-t config exercises the parametric `StudentT` path (D-014) under
+`make reproduce`.
 `benchmarks/make_toy_asset.py` generates the input as independent overnight and
 intraday components summing to a recorded `true_variance` (M2), so estimators
 can be validated against the truth. `make reproduce` rebuilds both from
@@ -536,12 +648,14 @@ stay in `volbench.models`, as does the private `_rv`), `PatchTST`/
 `FittedPatchTST` — plus `ForecastModel`/`FittedModel`,
 `run_backtest`/`forecast_moments`/`DEFAULT_LEVELS`/`SupportsUpdate`/
 `ModelFactory`, `ResultsStore` and the config-hash helpers,
-`Executor`/`SerialExecutor`, `mse`/`qlike`/`pinball`, and — since the
-Phase-2 integration — the inference entry points (`diebold_mariano`,
-`model_confidence_set`, `loss_matrix`, `dm_matrix`, `compare_models` and
-their result types) and the VaR-backtest ones (`kupiec_pof`,
-`christoffersen`, `fz0_loss`, `expected_shortfall`, `var_backtest` and their
-result types).
+`Executor`/`SerialExecutor`, `mse`/`qlike`/`pinball`, the inference entry
+points (`diebold_mariano`, `model_confidence_set`, `loss_matrix`,
+`dm_matrix`, `compare_models` and their result types), the VaR-backtest ones
+(`kupiec_pof`, `christoffersen`, `fz0_loss`, `expected_shortfall`,
+`var_backtest` and their result types) and — since `feat/p2-protocol` — the
+invalid-target policy (`FitSeries`, `InvalidTargetPolicy`,
+`DEFAULT_INVALID_TARGET_POLICY`, `InsufficientHistoryError`,
+`valid_target_mask`, `invalid_target_mask`).
 
 Per-source ingestion — the Stooq and Binance downloaders, their error types and
 symbol maps, the bring-your-own-data loaders — and the study's own panel
@@ -555,7 +669,11 @@ the `package_version()` that enters every config hash.
 ## Invariants (violations are bugs, not choices)
 1. No code path lets information from t' > t influence a forecast for t.
    Structurally enforced by `RollingOriginSplitter`; checked end-to-end by the
-   corruption canary in `tests/test_m1_smoke.py`.
+   corruption canary in `tests/test_m1_smoke.py`. Since D-018 one thing
+   *rewrites* which past observations a window holds — compaction — and it is
+   bounded by the same rule: it selects only positions `<= origin`, so it
+   reaches backwards and never forwards (`tests/test_compaction.py`, which
+   corrupts both later *values* and later *validity*).
 2. Every model output is a `Distribution`; no bare point arrays cross module
    boundaries. Pinned by `tests/test_model_interface.py`.
 3. Every result row carries seed + config hash; `make reproduce` regenerates
@@ -635,10 +753,20 @@ the guard, and keeps its own index assertion as a redundant belt.
 - [ ] **PatchTST per-device-class reproducibility** — `device` is unhashed,
       so a CPU and a GPU fragment can share a hash and differ; whether to hash
       the device class, or to pin the paper's runs to one, is a protocol call.
-- [ ] **Pending protocol decisions the panel report raised** (deliberately not
-      made at integration): the invalid-target policy (HSI's zero-variance
-      days and the inconsistent bars — NaN them, floor them, let HAR fail, or
-      drop the series), the rolling-window length (the GFC arm is mostly
-      inside the 500-observation warm-up), and whether the FTSE-100 slot (ISF,
-      history from 2015 only) is dropped. Each ships in a dedicated follow-up
-      against the merged tree.
+- [x] **Pending protocol decisions the panel report raised** (deliberately not
+      made at integration) — **all three resolved on `feat/p2-protocol`**:
+      the invalid-target policy is D-018 (drop unusable days from fit windows,
+      keep them as scored NaN rows — see "Invalid targets" above), the
+      rolling-window length is D-019 (500, with 1000 as the robustness arm),
+      and the FTSE-100 slot is D-020 (dropped; the panel is 11 assets, the
+      ingestion code is kept).
+- [ ] **Lag semantics under compaction**, new with D-018: for HAR and LightGBM
+      a positional lag can now span more than one calendar day on a series
+      with invalid days. Documented everywhere it applies; what remains open
+      is a presentation question — whether the paper reports those models'
+      memory in calendar days or in observations.
+- [ ] **The 1e-5 bar-repair threshold** still has no decision entry
+      (docs/PANEL_REPORT.md §9). D-018 lowered the stakes — a NaN'd day now
+      costs its own scored row and nothing else — but the split between
+      "rounding" and "real error" is still a judgement calibrated on one
+      archive.

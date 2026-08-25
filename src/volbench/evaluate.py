@@ -14,12 +14,27 @@ Conventions this module assumes (fixed for Phase 1, see
 - CRPS, log score, pinball and VaR hits are therefore computed against the
   realized *return*; QLIKE compares the distribution's variance against a
   realized-variance *proxy*.
+- ``var_<level>`` and ``es_<level>`` are the distribution's own tail
+  quantile and expected shortfall, in the return-side sign convention
+  (negative in the lower tail). Both describe the forecast alone, so both are
+  recorded even where the target is unscorable.
 
 Temporal integrity (CLAUDE.md rule 1): every index used here comes from
-``RollingOriginSplitter``. Models see ``series[origin.train]`` and nothing
-else; targets are read at ``origin.test``, which the splitter guarantees to
-start strictly after ``origin``. There is no slicing arithmetic in this file
-that the splitter did not produce.
+``RollingOriginSplitter``. Models see the observations at ``origin.train``
+and nothing else; targets are read at ``origin.test``, which the splitter
+guarantees to start strictly after ``origin``. There is no slicing arithmetic
+in this file that the splitter did not produce.
+
+The one refinement to "the observations at ``origin.train``" is D-018's
+invalid-target policy: a :class:`~volbench.compaction.FitSeries` carrying
+``policy="compact"`` materializes that window as the last ``len(train)``
+*valid* observations at positions ``<= origin``, so a day whose variance
+target is unmeasurable never reaches a model. That is still not slicing
+arithmetic this file performs — it hands the splitter's own index array to
+the series and takes back what it is given — and it reaches strictly
+backwards, never past the origin. The scored calendar is untouched: origins
+and targets remain calendar positions, and an invalid day is still scored,
+as the NaN-plus-``missing_reason`` row it has always been.
 
 One whole-series statistic does exist here — the content digest that goes
 into the config hash — and it is deliberately *not* a leak: it is computed
@@ -39,6 +54,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from volbench.compaction import FitSeries
 from volbench.dist import Distribution, Empirical, QuantileGrid
 from volbench.execute import Executor, SerialExecutor
 from volbench.metrics import qlike
@@ -54,6 +70,7 @@ from volbench.splitter import Origin, RollingOriginSplitter
 
 __all__ = [
     "DEFAULT_LEVELS",
+    "FitSeries",
     "FittedModel",
     "ForecastModel",
     "ModelFactory",
@@ -256,6 +273,15 @@ def _score(
         tag = _level_tag(level)
         var_quantile = dist.quantile(level)
         out[f"var_{tag}"] = var_quantile
+        # The ES the same predictive law implies, recorded next to its own
+        # VaR. Like ``var_<level>`` it is a property of the forecast alone, so
+        # it is written even on rows whose target is unscorable — a forecast
+        # that was made is a forecast that gets described.
+        try:
+            out[f"es_{tag}"] = dist.expected_shortfall(level)
+        except NotImplementedError:
+            out[f"es_{tag}"] = math.nan
+            reasons.add("es_undefined")
         out[f"pinball_{tag}"] = dist.pinball(realized_return, level) if target_ok else math.nan
         out[f"hit_{tag}"] = float(realized_return < var_quantile) if target_ok else math.nan
 
@@ -294,6 +320,7 @@ def _result_dtypes(levels: tuple[float, ...]) -> dict[str, str]:
     for level in levels:
         tag = _level_tag(level)
         dtypes[f"var_{tag}"] = "float64"
+        dtypes[f"es_{tag}"] = "float64"
         dtypes[f"pinball_{tag}"] = "float64"
         dtypes[f"hit_{tag}"] = "float64"
     return dtypes
@@ -334,6 +361,7 @@ def _failure_scores(levels: tuple[float, ...], reason: str) -> dict[str, Any]:
     for level in levels:
         tag = _level_tag(level)
         out[f"var_{tag}"] = math.nan
+        out[f"es_{tag}"] = math.nan
         out[f"pinball_{tag}"] = math.nan
         out[f"hit_{tag}"] = math.nan
     out["missing_reason"] = reason
@@ -370,7 +398,7 @@ class _BlockTask:
     """
 
     model_factory: ModelFactory
-    fit_series: NDArray[np.float64]
+    fit_series: FitSeries
     series: NDArray[np.float64]
     proxy: NDArray[np.float64]
     origins: tuple[Origin, ...]
@@ -444,6 +472,14 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
     Rows without a fitted model carry ``fit_origin = conditioned_through =
     -1``: there is no fit to point at, and those columns are pinned int64.
 
+    Materializing the window is part of the fit, so it fails the same way. On
+    a compacted series (D-018) the earliest origins may not have ``window``
+    valid observations behind them yet;
+    :class:`~volbench.compaction.InsufficientHistoryError` then arrives here
+    like any other ``fit``/``update`` exception and becomes a failure row
+    naming the shortfall. A short window is never silently fitted: the run
+    would then report a window length it did not use.
+
     Only :class:`Exception` is caught. ``KeyboardInterrupt``, ``SystemExit``
     and friends propagate — a user ending a run is not a bad origin.
     """
@@ -458,7 +494,7 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
         origin_failure: str | None
         if origin.refit or (fitted is None and block_failure is None):
             try:
-                fitted = model.fit(task.fit_series[origin.train])
+                fitted = model.fit(task.fit_series.window(origin.train))
             except Exception as exc:
                 fitted = None
                 fit_origin = conditioned_through = -1
@@ -474,7 +510,7 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
             origin_failure = block_failure
         elif task.recondition == "daily" and isinstance(fitted, SupportsUpdate):
             try:
-                fitted = fitted.update(task.fit_series[origin.train])
+                fitted = fitted.update(task.fit_series.window(origin.train))
             except Exception as exc:
                 origin_failure = _exception_reason("update_error", exc, origin=origin.origin)
                 _log_failure(task.model_name, task.asset, origin.origin, origin_failure, exc)
@@ -621,6 +657,29 @@ def _as_series(values: object, name: str, expected: int | None = None) -> NDArra
     return array
 
 
+def _as_fit_series(fit_series: object, series_array: NDArray[np.float64]) -> FitSeries:
+    """Normalize whatever the caller passed into one :class:`FitSeries`.
+
+    A bare array (or none at all, meaning "fit on the returns") carries no
+    invalid-target policy, so it becomes ``policy="none"``: the window is the
+    splitter's own positions and every value in it reaches the model, which is
+    what every caller before D-018 got and what the config hash for those runs
+    described. Compaction is opted into by handing a :class:`FitSeries` —
+    normally the one the study's series-loading layer built
+    (:meth:`volbench.data.panel.PanelSeries.fit_input`).
+    """
+    if fit_series is None:
+        return FitSeries.raw(series_array)
+    if isinstance(fit_series, FitSeries):
+        if fit_series.size != series_array.size:
+            raise ValueError(
+                f"fit_series has length {fit_series.size}, expected {series_array.size} to "
+                "match series"
+            )
+        return fit_series
+    return FitSeries.raw(_as_series(fit_series, "fit_series", expected=series_array.size))
+
+
 def run_backtest(
     model_factory: ModelFactory,
     series: object,
@@ -651,7 +710,10 @@ def run_backtest(
         blocks span time. volbench cannot check this — a model constructed
         with a reference to the full series can always cheat — so the
         guarantee this module makes is narrower and exact: *volbench itself
-        passes a model nothing but ``fit_series[origin.train]``.*
+        passes a model nothing but observations at positions ``<=
+        origin.origin`` of ``fit_series``* — ``fit_series[origin.train]``
+        exactly, or, under D-018's compaction policy, the last
+        ``len(origin.train)`` valid ones of them.
     series:
         Daily returns. Supplies both the training input and the realized
         target for CRPS, log score, pinball and VaR hits.
@@ -686,10 +748,24 @@ def run_backtest(
         the cache cannot serve results computed from different numbers even
         if the caller's label is unchanged.
     fit_series:
-        Optional alternative model input, sliced with the *same* splitter
-        indices as ``series``. For models whose input is not the return series
-        — HAR-RV takes realized variances — pass it here; scoring still uses
-        ``series``, keeping the return-distribution convention intact.
+        Optional alternative model input, on the *same* calendar as
+        ``series``. For models whose input is not the return series — HAR-RV
+        and the log-RV models take realized variances — pass it here; scoring
+        still uses ``series``, keeping the return-distribution convention
+        intact.
+
+        A bare array or pandas Series is windowed with the splitter's own
+        indices, exactly as ``series`` is. A
+        :class:`~volbench.compaction.FitSeries` additionally carries D-018's
+        invalid-target policy: under ``policy="compact"`` each window is the
+        last ``window`` **valid** observations at or before the origin, so
+        days whose variance target is NaN or non-positive never reach a model
+        and a single unmeasurable day no longer fails every window containing
+        it. The policy is part of the config hash whenever it is not
+        ``"none"``, so the compacted and uncompacted arms cannot share a cache
+        entry. An origin with too little valid history for a full window
+        produces the standard NaN-plus-``missing_reason`` row rather than a
+        quiet short fit.
     levels:
         Tail levels for pinball loss and VaR. Part of the config hash, since
         they determine the output columns.
@@ -732,7 +808,9 @@ def run_backtest(
     scoring exception produces a row with NaN scores and a ``missing_reason``
     of the form ``<stage>[@origin]: <ExceptionType>: <message>`` — for
     example ``fit_error@499: ValueError: realized-variance series must be
-    finite and strictly positive`` — rather than aborting the cell. A failed
+    finite and strictly positive``, or, at the start of a compacted series,
+    ``fit_error@499: InsufficientHistoryError: only 498 valid observations at
+    or before origin 499, ...`` — rather than aborting the cell. A failed
     scheduled fit fails every origin in its block (the cadence is never
     changed to work around it); a failed update fails its own origin only.
     Such rows carry ``fit_origin = conditioned_through = -1``. Each failure is
@@ -751,13 +829,21 @@ def run_backtest(
     _require_one_calendar(("series", series), ("proxy", proxy), ("fit_series", fit_series))
     series_array = _as_series(series, "series")
     proxy_array = _as_series(proxy, "proxy", expected=series_array.size)
-    fit_array = (
-        series_array
-        if fit_series is None
-        else _as_series(fit_series, "fit_series", expected=series_array.size)
-    )
+    fit_input = _as_fit_series(fit_series, series_array)
 
     probe = model_factory()
+    # Protocol settings are recorded exactly when they bind (see the parameter
+    # docstrings), so a setting that cannot change a number does not change the
+    # run's identity and every config hashed before a key existed keeps its
+    # hash. ``recondition`` binds only when there are non-refit origins;
+    # ``invalid_target_policy`` binds whenever a policy other than "none" is in
+    # force, because compaction then materializes every window it is asked for.
+    protocol: dict[str, Any] = {}
+    if splitter.refit_every > 1:
+        protocol["recondition"] = recondition
+    if fit_input.policy != "none":
+        protocol["invalid_target_policy"] = fit_input.policy
+
     config = build_config(
         model_name=probe.name,
         model_spec=probe.spec(),
@@ -765,17 +851,14 @@ def run_backtest(
             "asset": asset,
             "n": int(series_array.size),
             "series_sha256": array_digest(series_array),
-            "fit_series_sha256": array_digest(fit_array),
+            "fit_series_sha256": array_digest(fit_input.values),
             "proxy": {"name": proxy_name, "sha256": array_digest(proxy_array)},
             **dict(data_spec or {}),
         },
         splitter=splitter,
         seed=seed,
         scoring={"levels": list(levels_tuple)},
-        # Recorded exactly when it binds (see the parameter docstring): with
-        # one refit per origin there is nothing to re-condition, and a setting
-        # that cannot change a number is not part of the experiment's identity.
-        protocol={"recondition": recondition} if splitter.refit_every > 1 else None,
+        protocol=protocol or None,
     )
     hash_value = config_hash(config)
 
@@ -790,7 +873,7 @@ def run_backtest(
     tasks = [
         _BlockTask(
             model_factory=model_factory,
-            fit_series=fit_array,
+            fit_series=fit_input,
             series=series_array,
             proxy=proxy_array,
             origins=block,
