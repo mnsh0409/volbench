@@ -37,10 +37,14 @@ instruments instead:
 - ``^ndx``, ``^dax``, ``^cac``, ``^nkx``, ``^hsi``, ``^twse``, ``^kospi``
   all confirmed correct and unchanged.
 
-This is a data-provenance change worth a human decision, not just a symbol
-fix: the SPX/DJI/FTSE100 slots in the D-004 panel now resolve to Stooq's
-own CFD proxies, not the licensed indices docs/research_design.md
-describes. Flagged in docs/data_licenses.md rather than resolved here.
+That was a data-provenance change worth a human decision, not just a symbol
+fix, and the decision was taken (D-012, Phase 2): the three slots are filled
+by tradable ETFs on the index — SPY, DIA, ISF — never by the CFD proxies.
+``STOOQ_INDEX_SYMBOLS`` below therefore carries only the seven indices Stooq
+still serves as indices; the study's actual asset list, ETFs included, is
+``volbench.data.panel.EQUITY_PANEL``, the single source of truth for what the
+panel contains. (The CFD entries were retired at the Phase-2 integration;
+docs/PANEL_REPORT.md §9 item 8.)
 
 Never commit downloaded data: caches live under a gitignored directory
 (default ``data/cache/stooq/``) and are never vendored with the package.
@@ -51,6 +55,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -73,15 +78,14 @@ __all__ = [
 STOOQ_CSV_URL = "https://stooq.com/q/d/l/"
 
 #: canonical asset id -> Stooq ticker for the D-004 core equity-index panel.
-#: All confirmed live on 2026-08-23 (see module docstring). SPX/DJI/FTSE map
-#: to Stooq's unlicensed CFD proxies, not the literal licensed indices — a
-#: provenance change flagged in docs/data_licenses.md, not silently absorbed.
+#: All confirmed live on 2026-08-23 (see module docstring). Only the indices
+#: Stooq serves *as indices*: the SPX/DJI/FTSE slots are NOT here — Stooq
+#: retired those symbols in favour of unlicensed CFD proxies (^uslc, ^usbc,
+#: ^uklc), and D-012 fills the slots with ETFs (SPY/DIA/ISF) instead. The
+#: panel's asset list lives in ``volbench.data.panel.EQUITY_PANEL``.
 STOOQ_INDEX_SYMBOLS: dict[str, str] = {
-    "SPX": "^uslc",  # was ^spx: Stooq retired it, redirects to ^USLC "U.S. Large Cap CFD"
     "NDX": "^ndx",  # NASDAQ-100 — confirmed
-    "DJI": "^usbc",  # was ^dji: Stooq retired it, redirects to ^USBC "U.S. Blue Chip CFD"
     "DAX": "^dax",  # DAX — confirmed
-    "FTSE": "^uklc",  # ^ftse doesn't exist; Main Indices lists FTSE 100 as ^UKLC "UK Large Cap CFD"
     "CAC": "^cac",  # CAC 40 — confirmed
     "NKX": "^nkx",  # Nikkei 225 — confirmed
     "HSI": "^hsi",  # Hang Seng — confirmed
@@ -137,23 +141,90 @@ def fetch_stooq_csv(
     return payload
 
 
+_ANGLE_HEADER = re.compile(r"^<(.+)>$")
+_YYYYMMDD = re.compile(r"^\d{8}$")
+
+#: bulk-archive column names -> the names used everywhere else in volbench.
+_BULK_COLUMN_ALIASES = {"vol": "volume"}
+
+
+def _normalize_columns(columns: pd.Index) -> list[str]:
+    """Lower-case headers and unwrap the bulk archive's ``<ANGLE>`` brackets.
+
+    The per-symbol CSV export writes ``Date,Open,High,Low,Close,Volume``; the
+    bulk ``d_*_txt`` archives write ``<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,
+    <HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>`` for the same daily bars. Both reduce
+    to the same lower-case names here so one parser serves both.
+    """
+    names: list[str] = []
+    for column in columns:
+        name = str(column).strip().lower()
+        match = _ANGLE_HEADER.match(name)
+        if match:
+            name = match.group(1).strip()
+        names.append(_BULK_COLUMN_ALIASES.get(name, name))
+    return names
+
+
+def _parse_date_column(dates: pd.Series) -> pd.Series:
+    """Parse Stooq's date column, which is ISO in the export and ``YYYYMMDD`` in bulk.
+
+    The bulk form must be parsed with an explicit format: as a bare integer
+    ``20050225`` pandas would read it as a nanosecond epoch, and as a bare
+    string it is ambiguous. Getting this wrong silently reorders the panel, so
+    the branch is explicit rather than left to inference.
+    """
+    text = dates.astype(str).str.strip()
+    if bool(text.map(lambda value: _YYYYMMDD.match(value) is not None).all()):
+        parsed: pd.Series = pd.to_datetime(text, format="%Y%m%d", utc=True)
+        return parsed
+    fallback: pd.Series = pd.to_datetime(dates, utc=True)
+    return fallback
+
+
 def parse_stooq_csv(raw: bytes) -> pd.DataFrame:
-    """Parse a Stooq daily CSV payload (``Date,Open,High,Low,Close,Volume``).
+    """Parse a Stooq daily payload into a UTC-indexed OHLCV DataFrame.
+
+    Accepts either shape Stooq publishes for the same daily bars:
+
+    - the per-symbol CSV export, ``Date,Open,High,Low,Close,Volume`` with ISO
+      dates (what :func:`fetch_stooq_csv` targets and what a browser download
+      of a single quote page yields); and
+    - a per-symbol file out of a bulk ``d_{us,uk,jp,hk,world}_txt`` archive,
+      ``<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,
+      <OPENINT>`` with ``YYYYMMDD`` dates.
 
     Returns a DataFrame indexed by UTC timestamp (midnight of the trading
-    date) with lower-cased columns, sorted ascending by date.
+    date), sorted ascending, carrying only ``open``/``high``/``low``/``close``
+    and ``volume`` when present. ``<PER>``, ``<TIME>`` and ``<OPENINT>`` are
+    dropped: every file here is daily (``PER=D``, ``TIME=000000``) and open
+    interest is not an OHLC field. ``<TICKER>`` is dropped from the frame but
+    returned in ``frame.attrs["ticker"]`` so callers can verify they opened the
+    file they meant to (see :func:`ingest_manual_csv`).
     """
     df = pd.read_csv(io.BytesIO(raw))
-    df.columns = [str(c).strip().lower() for c in df.columns]
+    df.columns = pd.Index(_normalize_columns(df.columns))
     required = {"date", "open", "high", "low", "close"}
     missing = required - set(df.columns)
     if missing:
         raise StooqDownloadError(f"Stooq CSV missing expected columns: {sorted(missing)}")
-    df["date"] = pd.to_datetime(df["date"], utc=True)
+
+    ticker = None
+    if "ticker" in df.columns:
+        tickers = set(df["ticker"].astype(str).str.strip().str.upper())
+        if len(tickers) > 1:
+            raise StooqDownloadError(
+                f"Stooq file mixes several tickers: {sorted(tickers)}; expected exactly one"
+            )
+        ticker = tickers.pop() if tickers else None
+
+    df["date"] = _parse_date_column(df["date"])
     df = df.sort_values("date").set_index("date")
     df.index.name = "timestamp"
     keep = [c for c in ("open", "high", "low", "close", "volume") if c in df.columns]
-    return df[keep]
+    out = df[keep]
+    out.attrs["ticker"] = ticker
+    return out
 
 
 def _sanitize_symbol(symbol: str) -> str:
@@ -218,10 +289,16 @@ def download_index(
 
 @dataclass(frozen=True)
 class ManualIngestResult:
-    """Result of ingesting a manually-downloaded Stooq CSV."""
+    """Result of ingesting a manually-downloaded Stooq CSV.
+
+    ``ticker`` is the symbol the file declared in its own ``<TICKER>`` column
+    (bulk-archive files only; ``None`` for the per-symbol CSV export, which
+    carries no such column).
+    """
 
     frame: TimeSeriesFrame
     sha256: str
+    ticker: str | None = None
 
 
 def ingest_manual_csv(
@@ -230,16 +307,34 @@ def ingest_manual_csv(
     asset_id: str,
     cache_dir: Path | str = Path("data/cache/stooq"),
     ingested_on: date | None = None,
+    expect_ticker: str | None = None,
 ) -> ManualIngestResult:
-    """Parse and cache a CSV a human downloaded from stooq.com in a browser.
+    """Parse and cache a Stooq file a human downloaded in a browser.
 
     This is the supported path while stooq.com's anti-bot gate blocks
-    :func:`download_index` (see module docstring). Applies the same parsing,
-    validation, hashing, and caching as the automated path.
+    :func:`download_index` (see module docstring), and it is also how the
+    per-symbol files inside a hand-downloaded bulk ``d_*_txt`` archive are
+    ingested — :func:`parse_stooq_csv` reads both layouts. Applies the same
+    parsing, validation, hashing, and caching either way.
+
+    ``expect_ticker`` guards against opening the wrong file out of an archive
+    holding tens of thousands of symbols: if given, and the file declares its
+    own ``<TICKER>``, the two must match (case-insensitively) or this raises.
+    Files without a ticker column cannot be checked and pass silently.
     """
     raw = Path(path).read_bytes()
     sha256 = hashlib.sha256(raw).hexdigest()
     df = parse_stooq_csv(raw)
+    ticker = df.attrs.get("ticker")
+    if (
+        expect_ticker is not None
+        and ticker is not None
+        and ticker.upper() != expect_ticker.strip().upper()
+    ):
+        raise StooqDownloadError(
+                f"{Path(path)} declares ticker {ticker!r}, expected {expect_ticker!r} "
+                f"for asset_id {asset_id!r}"
+            )
     frame = TimeSeriesFrame(data=df, asset_id=asset_id, source="stooq")
 
     symbol = STOOQ_INDEX_SYMBOLS.get(asset_id, asset_id)
@@ -262,4 +357,4 @@ def ingest_manual_csv(
             sort_keys=True,
         )
     )
-    return ManualIngestResult(frame=frame, sha256=sha256)
+    return ManualIngestResult(frame=frame, sha256=sha256, ticker=ticker)

@@ -18,8 +18,10 @@ from volbench.data import (
     garman_klass,
     log_returns,
     overnight_plus_range_variance,
+    overnight_variance,
     parkinson,
     realized_variance_from_bars,
+    rogers_satchell,
     squared_return,
 )
 
@@ -372,3 +374,79 @@ class TestRealizedVarianceFromBars:
         idx = pd.date_range("2024-01-02", periods=3, freq="1min", tz="UTC")
         with pytest.raises(ValueError, match="strictly positive"):
             realized_variance_from_bars(pd.Series([1.0, 0.0, 3.0], index=idx))
+
+
+class TestOvernightIntradayDecomposition:
+    """The D-016 target is exactly its two published pieces (D-016, panel report §5)."""
+
+    def _bars(
+        self, n: int = 300, steps_per_day: int = 120
+    ) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+        """Bars from a simulated driftless intraday path of known variance 0.008**2."""
+        rng = np.random.default_rng(4242)
+        index = pd.bdate_range("2020-01-01", periods=n, tz="UTC")
+        log_open = np.log(100.0) + np.cumsum(rng.normal(0.0, 0.01, n))
+        scale = 0.008 / np.sqrt(steps_per_day)
+        steps = np.cumsum(rng.normal(0.0, scale, (n, steps_per_day)), axis=1)
+        open_ = pd.Series(np.exp(log_open), index=index)
+        close = pd.Series(np.exp(log_open + steps[:, -1]), index=index)
+        high = pd.Series(np.exp(log_open + np.maximum(steps.max(axis=1), 0.0)), index=index)
+        low = pd.Series(np.exp(log_open + np.minimum(steps.min(axis=1), 0.0)), index=index)
+        return open_, high, low, close
+
+    def test_target_is_the_sum_of_its_parts(self) -> None:
+        o, h, low, c = self._bars()
+        total = overnight_variance(o, c) + rogers_satchell(o, h, low, c)
+        pd.testing.assert_series_equal(
+            total, overnight_plus_range_variance(o, h, low, c), check_names=False
+        )
+
+    def test_overnight_term_reads_only_the_previous_close(self) -> None:
+        # Backward-looking by construction: changing a *later* close must not
+        # move an earlier day's overnight variance.
+        o, _h, _low, c = self._bars(50)
+        before = overnight_variance(o, c)
+        tampered = c.copy()
+        tampered.iloc[30:] *= 1.5
+        after = overnight_variance(o, tampered)
+        pd.testing.assert_series_equal(before.iloc[:30], after.iloc[:30])
+
+    def test_first_overnight_observation_is_nan(self) -> None:
+        o, _, _, c = self._bars(10)
+        assert np.isnan(overnight_variance(o, c).iloc[0])
+
+    def test_overnight_variance_is_non_negative(self) -> None:
+        o, _, _, c = self._bars()
+        assert (overnight_variance(o, c).dropna() >= 0).all()
+
+    def test_rogers_satchell_is_non_negative_on_consistent_bars(self) -> None:
+        o, h, low, c = self._bars()
+        assert (rogers_satchell(o, h, low, c) >= 0).all()
+
+    def test_rogers_satchell_is_zero_on_a_monotone_bar(self) -> None:
+        # A day that opens at its high and closes at its low has RS == 0
+        # exactly. Combined with a stale open this is how a real series gets a
+        # zero variance target — see docs/PANEL_REPORT.md §4.
+        index = pd.DatetimeIndex([pd.Timestamp("2020-01-02", tz="UTC")])
+        o = pd.Series([10.0], index=index)
+        h = pd.Series([10.0], index=index)
+        low = pd.Series([9.0], index=index)
+        c = pd.Series([9.0], index=index)
+        assert rogers_satchell(o, h, low, c).iloc[0] == 0.0
+
+    def test_rogers_satchell_recovers_the_intraday_variance(self) -> None:
+        """RS is unbiased for the intraday variance of a driftless path.
+
+        Asserted as a *limit*, because the only bias present is discretization:
+        a bar's high/low are the extremes of the sampled path, and a discretely
+        sampled maximum is below the continuous one. Refining the path from 120
+        to 2000 steps per day moves E[RS] from ~84% to ~96% of the truth, so the
+        test pins both the level at 2000 steps and the direction of the
+        convergence — a genuinely biased estimator would fail the second part
+        even if the tolerance on the first were loosened.
+        """
+        truth = 0.008**2
+        coarse = float(rogers_satchell(*self._bars(4000, steps_per_day=120)).mean())
+        fine = float(rogers_satchell(*self._bars(4000, steps_per_day=2000)).mean())
+        assert fine == pytest.approx(truth, rel=0.06)
+        assert coarse < fine < truth

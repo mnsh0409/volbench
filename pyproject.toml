@@ -1,6 +1,6 @@
 [project]
 name = "volbench"
-version = "0.2.0"
+version = "0.3.0"
 description = "Leakage-safe, reproducible evaluation of probabilistic volatility and tail-risk forecasts ??from GARCH to time-series foundation models."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,6 +36,42 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/mnsh0409/volbench"
 
+# Optional backends. The core library imports none of them: every adapter
+# below `volbench.models` that needs one imports it lazily inside `fit`, so
+# `import volbench` works with no extra installed and the tests for an absent
+# backend `importorskip`. Which extras a machine carries is therefore a
+# development choice, made explicit in the Makefile (`EXTRAS`) and in
+# `.github/workflows/ci.yml`, not something the package decides for the user.
+[project.optional-dependencies]
+# Phase-2 classical model backends (docs/research_design.md models 6-8):
+# `volbench.models.sf` (AutoETS / AutoARIMA) and `volbench.models.lgbm`.
+# Cheap, pure-CPU, and installed on every CI leg — the development gate is
+# only a gate on those two modules if their backends are importable.
+classical = [
+    "statsforecast>=2.0.2",
+    "lightgbm>=4.6.0",
+]
+# Zero-shot time-series foundation models (docs/research_design.md models
+# 10-13; decision D-005: zero-shot only). Never installed in CI — the default
+# test suite skips every @pytest.mark.tsfm test (see tests/conftest.py).
+#   uv sync --dev --extra classical --extra tsfm
+# torch is pinned to the CUDA build already proven on the 4090 box
+# (2.5.1+cu121, see [tool.uv.sources]); the tsfm-marked tests run there.
+tsfm = [
+    "torch==2.5.1",
+    "chronos-forecasting>=2.3.1,<3",
+    "timesfm[torch]>=2.0.2,<3",
+    "uni2ts>=2.0.0,<3",
+    "nixtla>=0.8.0,<1",
+]
+# The same torch, CPU build: what CI installs so the PatchTST baseline
+# (models/patchtst.py) keeps a 2-epoch CPU smoke test in the default suite
+# without 2.5 GB of CUDA libraries. Conflicts with `tsfm` by declaration
+# (one torch per environment); the GPU box syncs `tsfm`, CI syncs this.
+torch-cpu = [
+    "torch==2.5.1",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8",
@@ -45,6 +81,92 @@ dev = [
     "pytest-cov>=7.1.0",
     "pandas-stubs>=3.0.5.260730",
 ]
+
+# ---------------------------------------------------------------------------
+# Resolver configuration. Three mechanisms, each doing one job; they were
+# introduced by two Phase-2 streams independently and are reconciled here
+# (docs/P2_INTEGRATION.md §4). Reach for them in this order:
+#
+# 1. `override-dependencies` — a stale UPPER BOUND that some backend declares
+#    against a package volbench itself pins a floor for. An override replaces
+#    that requirement for EVERY requirer at resolution time, which is what is
+#    wanted when the bound is a compatibility guess rather than an observed
+#    break. Runtime compatibility under the overridden version is then a
+#    tested fact, not a hope (see each entry).
+# 2. `dependency-metadata` — a stale bound that CANNOT be overridden because
+#    the same package is also pinned per-extra to an index (torch, below).
+#    Re-declaring the requirer's metadata lifts the bound where it lives and
+#    touches nothing else.
+# 3. `conflicts` + `sources` + `index` — two builds of one package that can
+#    never coexist in one environment (torch cu121 vs torch cpu).
+# ---------------------------------------------------------------------------
+[tool.uv]
+# pandas>=3.0.5: statsforecast (through 2.1.1) declares a preemptive
+#   `pandas<3.0.0`; uni2ts 2.0.0 and nixtla declare `pandas<3` likewise.
+#   volbench's core requires pandas>=3.0.5, so the `classical` and `tsfm`
+#   extras are unresolvable without lifting it. The cap is a guess, not an
+#   observed break: `tests/test_models_sf.py::TestBackendCompatibility` runs
+#   both statsforecast adapters' full code path under the installed pandas
+#   and fails loudly if the cap ever becomes real; the tsfm-marked tests do
+#   the same for uni2ts/nixtla on the GPU box.
+# numpy>=2.0, scipy>=1.17.1: uni2ts 2.0.0 (and its gluonts/datasets pins)
+#   declare numpy<2 and scipy~=1.11, stale relative to what they import and
+#   contradicting volbench's own floors (numpy 2.0 for np.trapezoid).
+# Revisit (and drop the matching entry) when a backend releases with the
+# bound lifted.
+override-dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.17.1",
+    "pandas>=3.0.5",
+]
+# One torch build per environment: `tsfm` carries cu121, `torch-cpu` the CPU
+# wheels (see [tool.uv.sources]).
+conflicts = [[{ extra = "tsfm" }, { extra = "torch-cpu" }]]
+
+# uni2ts 2.0.0 also caps `torch<2.5`. That one cannot be lifted with an
+# override: an override replaces every torch requirement — the extras' own
+# index-scoped `torch==2.5.1` included — and is not aware of the extra
+# conflict above, so the resolver either lost the PyTorch index or saw both
+# indexes at once. Re-declaring uni2ts's requirements here (its published
+# list, torch cap removed) lifts the cap where it lives and touches nothing
+# else. Update this block alongside the uni2ts version.
+[[tool.uv.dependency-metadata]]
+name = "uni2ts"
+version = "2.0.0"
+requires-dist = [
+    "torch>=2.1",
+    "lightning>=2.0",
+    "gluonts~=0.14.3",
+    "numpy~=1.26.0",
+    "scipy~=1.11.3",
+    "einops==0.7.*",
+    "jaxtyping~=0.2.24",
+    "python-dotenv==1.0.0",
+    "hydra-core==1.3",
+    "orjson",
+    "tensorboard",
+    "multiprocess",
+    "huggingface_hub>=0.23.0",
+    "safetensors",
+    "datasets~=2.17.1",
+    "jax[cpu]",
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu121", extra = "tsfm", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cpu", extra = "torch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
@@ -74,6 +196,36 @@ strict = true
 # would make that file assert nothing at type-check time.
 files = ["src", "tests/test_model_interface.py"]
 
+# The TSFM backends are optional (extra "tsfm") and absent in CI; the adapters
+# import them lazily inside functions. Treat them as untyped whether or not
+# they are installed, so mypy's verdict does not depend on which extras the
+# machine happens to carry.
+[[tool.mypy.overrides]]
+module = [
+    "chronos",
+    "chronos.*",
+    "huggingface_hub",
+    "huggingface_hub.*",
+    "nixtla",
+    "nixtla.*",
+    "timesfm",
+    "timesfm.*",
+    "torch",
+    "torch.*",
+    "transformers",
+    "transformers.*",
+    "uni2ts",
+    "uni2ts.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Gated in tests/conftest.py: both skip by default and always under CI.
+markers = [
+    "tsfm: needs foundation-model weights (and ideally a GPU); opt in with VOLBENCH_RUN_TSFM=1",
+    "timegpt: calls the TimeGPT API; runs only when NIXTLA_API_KEY is set",
+    "gpu: trains on a CUDA device; opt in with VOLBENCH_RUN_GPU=1",
+]

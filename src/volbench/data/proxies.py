@@ -20,8 +20,10 @@ __all__ = [
     "garman_klass",
     "log_returns",
     "overnight_plus_range_variance",
+    "overnight_variance",
     "parkinson",
     "realized_variance_from_bars",
+    "rogers_satchell",
     "squared_return",
 ]
 
@@ -124,7 +126,7 @@ def _check_ohlc(open_: pd.Series, high: pd.Series, low: pd.Series, close: pd.Ser
         raise ValueError("low must be <= open and <= close at every observation")
 
 
-def _rogers_satchell(
+def rogers_satchell(
     open_: pd.Series, high: pd.Series, low: pd.Series, close: pd.Series
 ) -> pd.Series:
     """Rogers & Satchell (1991) per-day estimator of the open-to-close variance.
@@ -133,10 +135,33 @@ def _rogers_satchell(
     of a Brownian motion with *any* drift (their result), which Parkinson and
     Garman-Klass are not; blind, by construction, to what happens between the
     previous close and today's open.
+
+    Made public at the Phase-2 panel build so the D-016 target can be reported
+    as its two parts — this intraday term and :func:`overnight_variance` — which
+    is what the panel's "overnight share" diagnostic measures. The estimator
+    itself is unchanged; :func:`overnight_plus_range_variance` is literally the
+    sum of the two, so the decomposition cannot drift from the target.
     """
     hi_open, hi_close = _log(high / open_), _log(high / close)
     lo_open, lo_close = _log(low / open_), _log(low / close)
-    out: pd.Series = hi_open * hi_close + lo_open * lo_close
+    out: pd.Series = (hi_open * hi_close + lo_open * lo_close).rename("rogers_satchell")
+    return out
+
+
+def overnight_variance(open_: pd.Series, close: pd.Series) -> pd.Series:
+    """Squared overnight jump: ``(ln(O_t / C_{t-1}))^2``, daily units.
+
+    The close-to-open piece of the D-016 close-to-close target — the variance a
+    purely intraday range estimator (Parkinson, Garman-Klass, Rogers-Satchell)
+    structurally cannot see. The first observation is NaN (no ``C_{t-1}``) and
+    is left as a gap so the output stays index-aligned with its inputs.
+
+    Reads only day ``t``'s open and the *previous* close, so it is strictly
+    backward-looking.
+    """
+    o = open_.astype(np.float64)
+    c = close.astype(np.float64)
+    out: pd.Series = (_log(o / c.shift(1)) ** 2).rename("overnight_variance")
     return out
 
 
@@ -196,8 +221,9 @@ def overnight_plus_range_variance(
     lo = low.astype(np.float64)
     c = close.astype(np.float64)
     _check_ohlc(o, h, lo, c)
-    overnight = _log(o / c.shift(1))  # NaN on the first day: no previous close
-    out: pd.Series = (overnight**2 + _rogers_satchell(o, h, lo, c)).rename(
+    # NaN on the first day: no previous close. Summing the two public pieces
+    # keeps the target and its reported decomposition identical by construction.
+    out: pd.Series = (overnight_variance(o, c) + rogers_satchell(o, h, lo, c)).rename(
         "overnight_plus_range"
     )
     return out

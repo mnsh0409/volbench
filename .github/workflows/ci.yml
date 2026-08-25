@@ -2,12 +2,25 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    # feat/** is included on purpose: the Phase-2 streams found that a
+    # branch's "CI green" gate was otherwise only ever replicated locally,
+    # because this project merges feat/* branches without pull requests.
+    branches: [main, "feat/**", "m2/**"]
   pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Pin numpy to its x86-v3 (AVX2/FMA) SIMD kernels. numpy carries
+      # AVX-512-only float64 log/exp kernels that are not bit-identical to
+      # the v3 ones, and GitHub's runner pool mixes CPU generations, so the
+      # overnight-plus-range proxy — five logs per day — came back with a
+      # different content digest on an AVX-512 runner and every pinned toy
+      # config hash moved with it (docs/P2_INTEGRATION.md §3.6). Disabling a
+      # feature the runner lacks is a silent no-op, so this is safe on every
+      # runner; the Makefile's reproduce target exports the same value.
+      NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
     strategy:
       fail-fast: false
       matrix:
@@ -17,7 +30,14 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv sync --dev
-      - run: uv run ruff check .
-      - run: uv run mypy
-      - run: uv run pytest
+      # classical: statsforecast + lightgbm, so models/sf.py and models/lgbm.py
+      # are actually tested rather than importorskip'd.
+      # torch-cpu: the CPU build of the pinned torch, so the PatchTST baseline's
+      # 2-epoch smoke test runs here. The tsfm-marked and gpu-marked tests stay
+      # skipped (tests/conftest.py never honours their opt-ins under CI), and
+      # the `tsfm` extra (CUDA torch, foundation-model weights) is never
+      # installed in CI.
+      - run: uv sync --dev --extra classical --extra torch-cpu
+      - run: uv run --extra classical --extra torch-cpu ruff check .
+      - run: uv run --extra classical --extra torch-cpu mypy
+      - run: uv run --extra classical --extra torch-cpu pytest

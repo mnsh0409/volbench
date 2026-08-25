@@ -47,7 +47,7 @@ from volbench.benchmarks.toy import (
 )
 from volbench.dist import Distribution
 from volbench.evaluate import Recondition, run_backtest
-from volbench.results import build_config, config_hash
+from volbench.results import ResultsStore, build_config, canonical_repr, config_hash
 from volbench.splitter import RollingOriginSplitter
 
 N_ORIGINS = 200
@@ -55,17 +55,20 @@ N_ORIGINS = 200
 #: The toy benchmark's experiment identities on the committed M2 fixture
 #: (refit_every=1). They may change only with a deliberate version, protocol,
 #: fixture or target change — never as a side effect of adding a setting that
-#: does not bind. Updated at the 0.2.0 version bump (m2/cleanup item 3 —
-#: package_version is in every hash, so all five moved) after the
-#: shared-target change (item 1):
-#: every cell now scores against overnight_plus_range, so the four return-fed
-#: hashes moved; HAR's is unchanged — it was already that exact cell.
+#: does not bind. History: updated at the shared-target change (m2/cleanup
+#: item 1), at the 0.2.0 version bump (item 3 — package_version is in every
+#: hash), and at the 0.3.0 Phase-2 core integration (D-017: all eight moved
+#: with the version; autoets / autoarima / lgbm are new — the classical
+#: log-RV models joined the toy benchmark, D-019).
 PINNED_CONFIG_HASHES = {
-    "ewma": "a8b5c09920c71e50e5db6278e42a1f72d794cbd56adff8ac8d72e38d7724557e",
-    "garch11": "df8331ca16bffad6f02e149371258916a808c93bb0646b8a81a7021e83d72fdf",
-    "garch11_t": "2dc2b92736e9a757be178c826243d57143dd64c490cacbca0f81b2be3ef3cc3e",
-    "har": "1adf71499d65d74342b96e886708f7d3b626080ca395aa7fbcd4eef3091e0092",
-    "naive": "628a3eb5344efb81a4cfe4d10ce9c8152e2f338e486950cdbcd300f213968a5a",
+    "autoarima": "e26f67ea7e681f3aba7f60c273fb8092b23139c97987243b5c0cb3894a6a7ecd",
+    "autoets": "74904119f889e35d4c616cc1297577525b0900aa5f4a8ccfa49ec48ab35e7e2f",
+    "ewma": "a3b64eefffbacc95ce86c0bd8139854c35a39c712e94876188df9215e8542214",
+    "garch11": "c8a59b3a3ebd5274e5f7953fd66471bf3700cf73080bedcf9dc22a84f8def3a9",
+    "garch11_t": "0fd9610c3349a6a22665ed8f39c2e58f515b5b96addbd5a5fba21e4662e816a7",
+    "har": "96d1222c2141091e6c2c1a9d119f6a7106f8cc833ef172f2b45c73aa8c793f58",
+    "lgbm": "57e89612d4cc1fdc775a6c4deab218088662102dd95c4d974a846763aeeb8da0",
+    "naive": "7b41390aba8eeebb2f34af32c82c3776607958b6d1d73c197d5a0e0fa6283cd7",
 }
 
 
@@ -269,7 +272,14 @@ class TestEquivalenceAtRefitEveryOne:
         daily = run_toy_benchmark(out_dir=tmp_path / "daily", refit_every=1, recondition="daily")
         frozen = run_toy_benchmark(out_dir=tmp_path / "none", refit_every=1, recondition="none")
 
-        assert daily.config_hashes == frozen.config_hashes == PINNED_CONFIG_HASHES
+        # On a mismatch, show the whole canonical config of one cell: whether
+        # the model spec, the data digests, the splitter or the version moved
+        # is the first thing anyone needs to know, and the hash alone hides it.
+        naive_config = ResultsStore(tmp_path / "daily").read_config(daily.config_hashes["naive"])
+        assert daily.config_hashes == frozen.config_hashes == PINNED_CONFIG_HASHES, (
+            "pinned identities moved; the naive cell's config on this machine is:\n"
+            + canonical_repr(naive_config)
+        )
         for label, digest in daily.config_hashes.items():
             a = (tmp_path / "daily" / f"{digest}.parquet").read_bytes()
             b = (tmp_path / "none" / f"{digest}.parquet").read_bytes()

@@ -85,13 +85,19 @@ def test_hars_fit_input_is_the_close_to_close_series_under_either_target() -> No
     pd.testing.assert_series_equal(proxy, toy.targets[ROBUSTNESS_TARGET])
 
 
-def test_return_fed_models_take_no_fit_series() -> None:
+def test_only_the_variance_fed_models_take_a_fit_series() -> None:
+    # The variance-fed set is pinned by label: a model quietly gaining or
+    # losing the flag would feed it the wrong units without an error.
     toy = load_series()
+    variance_fed = {e.label for e in models() if e.fits_on_variance}
+    assert variance_fed == {"har", "autoets", "autoarima", "lgbm"}
     for entry in models():
-        if entry.label == "har":
-            continue
         _, _, fit_series = toy.inputs_for(entry)
-        assert fit_series is None
+        if entry.fits_on_variance:
+            assert fit_series is not None
+            pd.testing.assert_series_equal(fit_series, toy.targets[SCORING_TARGET])
+        else:
+            assert fit_series is None
 
 
 def test_an_unknown_target_is_rejected() -> None:
