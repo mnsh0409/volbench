@@ -34,7 +34,7 @@ from numpy.typing import NDArray
 
 from volbench.dist import Distribution, Normal
 from volbench.execute import Executor, ProcessExecutor, SerialExecutor
-from volbench.models import EWMA, GARCH, HAR, NaiveVol
+from volbench.models import EWMA, HAR, NaiveVol
 from volbench.results import ResultsStore
 from volbench.runner import (
     LANE_ORDER,
@@ -104,6 +104,38 @@ class ConstantVol:
 
     def predict(self, h: int) -> Distribution:
         return Normal(mu=0.0, sigma=0.01)
+
+
+class CountingNaive:
+    """A NaiveVol that counts how often it is constructed and fitted.
+
+    Class-level counters rather than a closure, because the factory has to stay
+    picklable; only the serial backend reads them, since counters do not cross
+    a process boundary.
+    """
+
+    constructions = 0
+    fits = 0
+
+    def __init__(self) -> None:
+        type(self).constructions += 1
+        self._inner = NaiveVol()
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.constructions = 0
+        cls.fits = 0
+
+    @property
+    def name(self) -> str:
+        return "counting_naive"
+
+    def spec(self) -> dict[str, Any]:
+        return {"model": "counting_naive"}
+
+    def fit(self, train: NDArray[np.float64], **ctx: Any) -> Any:
+        type(self).fits += 1
+        return self._inner.fit(train)
 
 
 def cpu_models() -> tuple[ModelConfig, ...]:
@@ -345,26 +377,32 @@ class TestResumability:
             if h not in lost:
                 assert after[h][1] == mtime, h  # and the survivors untouched
 
-    def test_a_cached_cell_never_constructs_a_model(
+    def test_a_cached_cell_fits_nothing_at_all(
         self, data: dict[str, AssetData], tmp_path: Path
     ) -> None:
         """The short-circuit has to happen before any work, or 'resumable'
-        only means 'does not duplicate rows'."""
+        only means 'does not duplicate rows'. Counted rather than timed: a
+        wall-clock comparison would pass for a cell that refitted quickly."""
         store = ResultsStore(tmp_path / "store")
         small = GridSpec(
             assets=("AAA",),
-            models=(ModelConfig("garch", functools.partial(GARCH, o=0, dist="normal")),),
+            models=(ModelConfig("counting", CountingNaive),),
             arms=(ProtocolArm("w120", window=WINDOW, refit_every=21),),
             seed=7,
         )
+        CountingNaive.reset()
         first = run_grid(small, data, store)
         assert first.n_computed == 1
+        fits_for_a_real_run = CountingNaive.fits
+        assert fits_for_a_real_run > 0
 
+        CountingNaive.reset()
         second = run_grid(small, data, store)
         assert second.n_cached == 1
-        # A cached cell costs a file-existence check and a parquet read; the
-        # fit it skipped is orders of magnitude more than that.
-        assert second.cells[0].wall_clock_s < first.cells[0].wall_clock_s
+        assert CountingNaive.fits == 0
+        # The probe run_backtest makes to read name/spec() for the hash is the
+        # only construction a cached cell is allowed, and it never fits.
+        assert CountingNaive.constructions == 1
 
     def test_overwrite_replaces_instead_of_skipping(
         self, grid: GridSpec, data: dict[str, AssetData], tmp_path: Path

@@ -23,7 +23,7 @@
 | `src/volbench/econ.py` (new) | `volatility_target_backtest`, `VolTargetBacktest`, `periods_per_year_for` (D-029) |
 | `src/volbench/models/har.py` | HAR onto `models/_rv`, Duan smearing by default (D-030) |
 | `src/volbench/models/patchtst.py` | `device_class` in `spec()`, `resolve_device_class` (D-031) |
-| tests | `test_runner.py` (38), `test_econ.py` (37), `test_execute.py` (31, was 6), `test_models_har.py` (17, was 8), `test_models_patchtst.py` (+5) |
+| tests | `test_runner.py` (38), `test_econ.py` (37), `test_execute.py` (34, was 6), `test_models_har.py` (17, was 8), `test_models_patchtst.py` (+5) — 1159 in the suite, up from 1073 |
 | docs | `docs/design.md` as-built; `docs/decisions.md` D-027…D-031; this file |
 
 Version **0.4.0 → 0.5.0**. Required, not cosmetic: D-030 changes what HAR
@@ -247,9 +247,9 @@ any grid freeze, for exactly the reason the brief gave for D-030.
 |---|---|
 | `uv run ruff check .` | clean |
 | `uv run mypy` (strict, `src` + `test_model_interface.py`) | clean, 43 source files |
-| `uv run pytest` — Python 3.11 | **1156 passed, 29 skipped**, 469 s |
-| Python 3.12 (`UV_PROJECT_ENVIRONMENT=.venv-py3.12`) | **1156 passed, 35 skipped**, 453 s |
-| Python 3.13 (`UV_PROJECT_ENVIRONMENT=.venv-py3.13`) | **1156 passed, 35 skipped**, 461 s |
+| `uv run pytest` — Python 3.11 | **1159 passed, 29 skipped**, 461 s |
+| Python 3.12 (`UV_PROJECT_ENVIRONMENT=.venv-py3.12`) | **1159 passed, 35 skipped**, 481 s |
+| Python 3.13 (`UV_PROJECT_ENVIRONMENT=.venv-py3.13`) | **1159 passed, 35 skipped**, 473 s |
 | `pytest -m "tsfm or gpu"` on the 4090 (`VOLBENCH_RUN_TSFM=1 VOLBENCH_RUN_GPU=1`, `--extra tsfm`) | **28 passed, 0 skipped**, 17 s |
 | `make benchmark` twice, `diff -r` | **byte-identical** across two full rebuilds |
 | `make smoke-tsfm` twice, `diff -r` | **byte-identical** across two full runs |
@@ -286,7 +286,14 @@ lgbm      5628598d…262957933   naive  da5fb0f6…4cb0373901a
 0.005852 / moirai 0.005853 / patchtst 0.005856 CRPS — unchanged from the
 v0.3.0 record; four new hashes with the version, PatchTST's also with D-031.
 
-### 8.3 Leakage audit
+### 8.3 CI
+
+`.github/workflows/ci.yml` on the branch push — ubuntu-latest × Python
+3.11/3.12/3.13, `--extra classical --extra torch-cpu`, ruff + mypy + pytest,
+with `NPY_DISABLE_CPU_FEATURES` pinned per D-026. Green on the branch
+(run 32856459336, 17m35s, and the two follow-up pushes).
+
+### 8.4 Leakage audit
 
 Full-diff audit against `.claude/skills/leakage-check`, with the econ
 position/return alignment as the focus: see §9.
