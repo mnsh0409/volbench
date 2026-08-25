@@ -48,7 +48,9 @@ from volbench.results import ResultsStore
 
 RUNTIME_BUDGET_SECONDS = 120.0
 EXPECTED_ORIGINS = 200
-EXPECTED_MODELS = 5  # M1's four baselines plus the Student-t GARCH added at M2
+#: M1's four baselines, the Student-t GARCH added at M2, and the three
+#: classical log-RV models added at the Phase-2 integration.
+EXPECTED_MODELS = 8
 
 
 @dataclass(frozen=True, eq=False)

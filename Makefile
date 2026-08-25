@@ -1,4 +1,4 @@
-.PHONY: test lint type check reproduce benchmark clean-results
+.PHONY: test lint type check reproduce benchmark clean-results smoke-tsfm
 
 # Which optional backends the gate runs against. `EXTRAS` is a variable
 # (override from the environment or the command line) because the two torch
@@ -61,6 +61,15 @@ benchmark: clean-results
 	@echo ""
 	@echo "reproduce: rebuilt $(TOY_OUT)/ (summary.csv, summary.md, one parquet per model)"
 
-# The paper's numbers will grow into this target. Today it rebuilds the M1
-# toy benchmark, behind the full check suite.
+# The paper's numbers will grow into this target. Today it rebuilds the toy
+# benchmark (the cheap models only), behind the full check suite.
 reproduce: check benchmark
+
+# Local only, never part of `reproduce`: the zero-shot foundation models and
+# PatchTST over the same toy series, into their own ResultsStore. Needs the
+# `tsfm` extra (CUDA torch + backends), cached HF weights, and ideally a GPU
+# (docs/P2_INTEGRATION.md §7). Named explicitly rather than through $(EXTRAS)
+# because the extras it needs are not negotiable.
+SMOKE_TSFM_OUT := data/smoke_tsfm
+smoke-tsfm:
+	uv run --extra classical --extra tsfm python -m volbench.benchmarks.smoke_tsfm --out-dir $(SMOKE_TSFM_OUT)

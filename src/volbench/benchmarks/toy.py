@@ -1,11 +1,18 @@
-"""The M1 toy benchmark: four baselines, 200 rolling origins, one scored table.
+"""The toy benchmark: the cheap models, 200 rolling origins, one scored table.
 
 This is the end-to-end smoke signal for volbench — the first thing that runs
-all three Phase 1 streams in series, on one series:
+the data, model and evaluation layers in series, on one series:
 
     data (ingest -> TimeSeriesFrame -> variance proxy)
-      -> models (naive / EWMA / GARCH(1,1) / HAR-RV)
+      -> models (naive / EWMA / GARCH(1,1) / HAR-RV / AutoETS / AutoARIMA / LightGBM)
         -> evaluation (RollingOriginSplitter -> run_backtest -> ResultsStore)
+
+Only models that fit in well under a second are here, because this is what
+`make reproduce` rebuilds and byte-compares on every machine (Phase 2 added
+the three classical log-RV models; together they cost ~1 minute at 200
+refits). The foundation models and PatchTST are deliberately NOT in it —
+they need weights, a GPU and the `tsfm` extra — and have their own local-only
+run, ``volbench.benchmarks.smoke_tsfm`` (``make smoke-tsfm``).
 
 It exists to prove the wiring holds and the numbers are reproducible, not to
 say anything about the models. The series is synthetic (see
@@ -28,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import importlib.util
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +47,7 @@ import pandas as pd
 from volbench.benchmarks.make_toy_asset import DEFAULT_PATH
 from volbench.data import load_ohlc_csv, log_returns, overnight_plus_range_variance, parkinson
 from volbench.evaluate import DEFAULT_LEVELS, ModelFactory, Recondition, run_backtest
-from volbench.models import EWMA, GARCH, HAR, NaiveVol
+from volbench.models import EWMA, GARCH, HAR, AutoARIMARV, AutoETSRV, LightGBMRV, NaiveVol
 from volbench.results import ResultsStore
 from volbench.splitter import RollingOriginSplitter
 
@@ -96,25 +104,48 @@ class ModelEntry:
     fits_on_variance: bool = False
 
 
+def _require_backend(module: str, extra: str) -> None:
+    """Fail up front, by name, if an optional backend is missing.
+
+    Without this, a missing backend would surface as 200 ``fit_error@`` rows
+    that the evaluator dutifully records as NaN — a benchmark that "ran" and
+    checked nothing. ``tests/test_m1_smoke.py`` also asserts no row carries a
+    ``missing_reason``, but a message naming the extra is kinder than that.
+    """
+    if importlib.util.find_spec(module) is None:
+        raise ModuleNotFoundError(
+            f"the toy benchmark needs {module!r}; install the {extra!r} extra "
+            f"(uv sync --dev --extra {extra}) — see the Makefile's EXTRAS"
+        )
+
+
 def models() -> list[ModelEntry]:
-    """The toy model set: M1's four baselines plus a Student-t GARCH.
+    """The toy model set: M1's four baselines, a Student-t GARCH, and the
+    three Phase-2 classical log-RV models.
 
     The Student-t config was added at M2 so that `make reproduce` exercises
     the parametric ``StudentT`` path that closed M1 report §4.2 (D-014), not
-    only the unit tests. HAR is fed the overnight-plus-range series (§4.4,
-    D-016); every model is scored against the one benchmark-level target.
+    only the unit tests. HAR and the classical log-RV models (AutoETS,
+    AutoARIMA, LightGBM; Phase-2 integration) are fed the overnight-plus-
+    range series (§4.4, D-016) at their default ``retransform="smearing"``;
+    every model is scored against the one benchmark-level target.
 
     Factories are module-level classes or ``functools.partial`` over them, so
     they stay picklable for the Phase 2 process/Slurm executors — a lambda
     here would work today and break the moment a backend crosses a process
     boundary.
     """
+    _require_backend("statsforecast", "classical")
+    _require_backend("lightgbm", "classical")
     return [
         ModelEntry("naive", NaiveVol),
         ModelEntry("ewma", functools.partial(EWMA, lambda_=0.94)),
         ModelEntry("garch11", functools.partial(GARCH, o=0, dist="normal")),
         ModelEntry("garch11_t", functools.partial(GARCH, o=0, dist="studentst")),
         ModelEntry("har", HAR, fits_on_variance=True),
+        ModelEntry("autoets", AutoETSRV, fits_on_variance=True),
+        ModelEntry("autoarima", AutoARIMARV, fits_on_variance=True),
+        ModelEntry("lgbm", LightGBMRV, fits_on_variance=True),
     ]
 
 
@@ -312,11 +343,11 @@ def build_summary(
     return pd.DataFrame(rows).sort_values("crps").reset_index(drop=True)
 
 
-def _markdown(summary: pd.DataFrame, n_origins: int) -> str:
+def _markdown(summary: pd.DataFrame, n_origins: int, title: str = "toy benchmark") -> str:
     header = (
-        f"# volbench toy benchmark (M1)\n\n"
+        f"# volbench {title}\n\n"
         f"Synthetic series, {n_origins} rolling origins, h=1, daily units.\n"
-        f"Smoke signal only — see `src/volbench/benchmarks/toy.py`. "
+        f"Smoke signal only — see `src/volbench/benchmarks/`. "
         f"No number here belongs in the paper.\n\n"
     )
     # Hand-rolled rather than `DataFrame.to_markdown`, which needs the
@@ -333,7 +364,7 @@ def _markdown(summary: pd.DataFrame, n_origins: int) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the volbench M1 toy benchmark.")
+    parser = argparse.ArgumentParser(description="Run the volbench toy benchmark.")
     parser.add_argument("--out-dir", type=Path, default=Path("data/toy_benchmark"))
     parser.add_argument("--fixture", type=Path, default=DEFAULT_PATH)
     parser.add_argument("--seed", type=int, default=SEED)
