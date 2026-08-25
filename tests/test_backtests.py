@@ -474,12 +474,56 @@ def test_var_backtest_on_scored_rows() -> None:
     assert bad.n_hits <= 2  # a 3x-too-wide forecast is almost never breached
     assert bad.kupiec.p_value < 1e-4 and bad.christoffersen.p_cc < 1e-3
     assert bad.fz0_mean is not None and ok.fz0_mean < bad.fz0_mean
-    without_es = var_backtest(right, level)
+    # Rows scored at v0.4.0 or later carry their own ES, and that is what an
+    # unset `es` reads; passing the same numbers by hand cannot differ.
+    from_rows = var_backtest(right, level)
+    assert from_rows.fz0_n == n
+    assert from_rows.fz0_mean == pytest.approx(ok.fz0_mean, rel=0, abs=0)
+    assert from_rows.config_hash == ok.config_hash
+    # A frame from before the column existed still backtests, without FZ0.
+    legacy = right.drop(columns=[c for c in right.columns if c.startswith("es_")])
+    without_es = var_backtest(legacy, level)
     assert without_es.fz0_mean is None and without_es.fz0_n == 0
     assert without_es.kupiec == ok.kupiec
     assert len(ok.config_hash) == 64 and ok.config_hash != without_es.config_hash
     shuffled = right.sample(frac=1.0, random_state=0)
     assert var_backtest(shuffled, level).christoffersen == without_es.christoffersen
+
+
+def test_var_backtest_consumes_the_es_column_the_evaluator_wrote() -> None:
+    """The wiring, end to end: ``run_backtest`` writes ``es_<level>`` from the
+    predictive distribution, and ``var_backtest`` scores FZ0 from that column
+    without being handed anything.
+
+    Before v0.4.0 a caller had to rebuild the ES themselves — which meant
+    re-asserting a distributional family the row does not record, and the only
+    correct answer was the one the forecast object already knew. Now the row
+    carries it.
+    """
+    level = 0.01
+    cell = _cell(1.0, "right")
+    tag = "0p01"
+    assert f"es_{tag}" in cell.columns
+
+    scored = var_backtest(cell, level)
+    assert scored.fz0_n == len(cell)
+    assert scored.fz0_mean is not None and math.isfinite(scored.fz0_mean)
+
+    # The column is this cell's own ES, so scoring against it must agree
+    # exactly with recomputing it from the same forecasts.
+    by_hand = var_backtest(cell, level, es=_es_column(cell, level))
+    assert scored.fz0_mean == by_hand.fz0_mean
+    assert scored.config_hash == by_hand.config_hash
+
+    # ... and it ranks: the wide forecast's ES is wrong in the way FZ0 sees.
+    wide = var_backtest(_cell(3.0, "wide"), level)
+    assert wide.fz0_mean is not None and scored.fz0_mean < wide.fz0_mean
+
+    # A dropped row's ES never reaches the loss, even if it is degenerate.
+    with_gap = _cell(1.0, "right", proxy_nan_at=(500,)).copy()
+    with_gap.loc[with_gap["target_index"] == 500, f"es_{tag}"] = 0.0  # would fail FZ0's domain
+    guarded = var_backtest(with_gap, level, warn=False)  # 999 rows: just under the flag
+    assert guarded.n_dropped == 1 and guarded.fz0_mean is not None
 
 
 def test_var_backtest_missing_policy_and_bookkeeping() -> None:
@@ -511,7 +555,7 @@ def test_var_backtest_validation() -> None:
     with pytest.raises(ValueError, match="one value per row"):
         var_backtest(right, 0.05, es=np.zeros(3))
     with pytest.raises(ValueError, match="es column"):
-        var_backtest(right, 0.05, es="es_0p05")
+        var_backtest(right, 0.05, es="expected_shortfall_0p05")
     with pytest.raises(ValueError, match="policy"):
         var_backtest(right, 0.05, policy="drop")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="empty"):

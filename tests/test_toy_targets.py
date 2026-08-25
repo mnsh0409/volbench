@@ -24,10 +24,12 @@ import pytest
 from volbench.benchmarks.toy import (
     ROBUSTNESS_TARGET,
     SCORING_TARGET,
+    ToySeries,
     load_series,
     models,
     run_toy_benchmark,
 )
+from volbench.compaction import DEFAULT_INVALID_TARGET_POLICY, FitSeries
 
 FORECAST_COLUMNS = ["forecast_mean", "forecast_var", "crps", "log_score", "realized_return"]
 
@@ -73,13 +75,25 @@ def test_switching_the_target_moves_qlike_and_nothing_else(
     assert set(default["config_hash"]) != set(robust["config_hash"])
 
 
+def _assert_is_the_scoring_target(fit_series: FitSeries | None, toy: ToySeries) -> None:
+    """The fit input is the close-to-close series, under the D-018 policy."""
+    assert fit_series is not None
+    expected = toy.targets[SCORING_TARGET]
+    np.testing.assert_array_equal(fit_series.values, expected.to_numpy(dtype=np.float64))
+    assert fit_series.index is not None
+    assert expected.index.equals(fit_series.index)
+    # The benchmark runs the protocol the study runs, not a simpler path.
+    assert fit_series.policy == DEFAULT_INVALID_TARGET_POLICY == "compact"
+    # ... on a fixture where the policy provably changes nothing.
+    assert fit_series.n_invalid == 0
+
+
 def test_hars_fit_input_is_the_close_to_close_series_under_either_target() -> None:
     toy = load_series()
     har = next(e for e in models() if e.label == "har")
     for target in (SCORING_TARGET, ROBUSTNESS_TARGET):
         _, proxy, fit_series = toy.inputs_for(har, target=target)
-        assert fit_series is not None
-        pd.testing.assert_series_equal(fit_series, toy.targets[SCORING_TARGET])
+        _assert_is_the_scoring_target(fit_series, toy)
     # while the proxy tracks the flag
     _, proxy, _ = toy.inputs_for(har, target=ROBUSTNESS_TARGET)
     pd.testing.assert_series_equal(proxy, toy.targets[ROBUSTNESS_TARGET])
@@ -94,9 +108,10 @@ def test_only_the_variance_fed_models_take_a_fit_series() -> None:
     for entry in models():
         _, _, fit_series = toy.inputs_for(entry)
         if entry.fits_on_variance:
-            assert fit_series is not None
-            pd.testing.assert_series_equal(fit_series, toy.targets[SCORING_TARGET])
+            _assert_is_the_scoring_target(fit_series, toy)
         else:
+            # Return-fed models get no variance series, so D-018's policy has
+            # nothing to bind to and must not appear in their config.
             assert fit_series is None
 
 

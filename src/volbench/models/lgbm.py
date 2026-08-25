@@ -23,6 +23,17 @@ whether the nonlinearity and the extra lags buy anything over Corsi (2009).
 Logs for the same reason HAR uses them: RV is positive and right-skewed, and
 an L2 objective on the level would be dominated by a handful of crisis days.
 
+**Lag semantics under D-018 compaction.** ``t - 1`` here is a *position* in
+the series handed to ``fit``, not a calendar day. On a compacted panel series
+(``volbench.compaction``, the study's default) days whose variance target was
+unmeasurable are dropped from that series, so "lag 1" can span two or more
+calendar days, and the 22-lag window can span more than 22. The alternative
+would be imputing a variance that was never observed, which is worse; but the
+regressors are then "the previous 22 measured days", and any statement about
+the model's memory in calendar time has to say so. On a series with no invalid
+days — the toy fixture, and every series in the panel except HSI, TWSE, CAC
+and NKX — position and calendar coincide exactly.
+
 TEMPORAL INTEGRITY (CLAUDE.md rule 1) — the reason this module is written the
 way it is
 ==========================================================================

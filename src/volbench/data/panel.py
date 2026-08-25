@@ -32,6 +32,27 @@ previous close instead of a NaN — a strictly backward-looking use of data that
 already existed before the window opened. This module produces no train/test
 indices; that remains :class:`~volbench.splitter.RollingOriginSplitter`'s job
 alone.
+
+Unusable days (D-018)
+---------------------
+Real archives contain days with no usable variance: a bar whose close printed
+outside its own session range (its range targets are NaN), and a *monotone*
+bar whose open equals the previous close (Rogers-Satchell and the overnight
+term are both exactly zero, so the D-016 target is exactly 0). Rows are never
+dropped for either — the day keeps its place on the calendar and is scored as
+the NaN-plus-``missing_reason`` row it deserves — but such a day must not
+reach a model that works in logs. :meth:`PanelSeries.fit_input` is where that
+is enforced: it hands out a :class:`~volbench.compaction.FitSeries` whose
+windows are the last N *valid* observations at or before each origin, so
+every adapter is covered by one implementation.
+
+The consequence for lag semantics is real and is not hidden: to a model that
+reads positional lags of that series — HAR's daily/weekly/monthly components,
+LightGBM's 22 lags — "yesterday" means *the previous valid observation*, which
+after a drop is two or more calendar days back. Imputing the missing variance
+instead would put a number that was never measured into the regressors; a
+compacted lag is the honest alternative, and it is stated wherever those
+models are documented.
 """
 
 from __future__ import annotations
@@ -43,6 +64,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from volbench.compaction import (
+    DEFAULT_INVALID_TARGET_POLICY,
+    FitSeries,
+    InvalidTargetPolicy,
+    invalid_target_mask,
+)
 from volbench.data.crypto import CRYPTO_SYMBOLS, daily_realized_variance, fetch_and_cache_day
 from volbench.data.proxies import (
     garman_klass,
@@ -59,10 +86,13 @@ __all__ = [
     "DEFAULT_CACHE_ROOT",
     "DEFAULT_RAW_ROOT",
     "EQUITY_PANEL",
+    "FIT_WINDOW_DEFAULT",
+    "FIT_WINDOW_ROBUSTNESS",
     "PANEL_END",
     "PANEL_START",
     "PRIMARY_TARGET_CRYPTO",
     "PRIMARY_TARGET_EQUITY",
+    "RETIRED_EQUITY",
     "TARGET_NAMES",
     "BarQuality",
     "CryptoSpec",
@@ -73,6 +103,7 @@ __all__ = [
     "build_panel",
     "build_targets",
     "daily_bars_from_minutes",
+    "equity_spec",
     "repair_bars",
     "resolve_equity_path",
 ]
@@ -111,6 +142,24 @@ PRIMARY_TARGET_CRYPTO = "realized_variance"
 #: disagreement that must not be papered over). See docs/PANEL_REPORT.md §3.
 DEFAULT_REPAIR_TOLERANCE = 1e-5
 
+#: Rolling-origin fit window for panel runs, in observations (D-019).
+#:
+#: 500, not the 1000 the protocol carried until the panel report measured what
+#: it costs: at 1000 the global-financial-crisis window is largely inside the
+#: warm-up — the panel holds 140-149 GFC days per equity series and the
+#: evaluation scored 31-86 of them, none at all for the crypto arm's COVID
+#: window (docs/PANEL_REPORT.md §8.1). At 500 both crises are scored in full,
+#: which is what makes H3 ("TSFM relative performance degrades in crisis
+#: sub-samples") testable on the crises that motivate it.
+FIT_WINDOW_DEFAULT = 500
+
+#: The robustness arm (D-019): the same protocol at the longer window, kept so
+#: that "the ranking depends on the estimation window" is a measured claim
+#: rather than an assumption. The window is a field of
+#: :class:`~volbench.splitter.RollingOriginSplitter` and therefore already in
+#: every config hash, so the two arms can never collide onto one cached cell.
+FIT_WINDOW_ROBUSTNESS = 1000
+
 
 @dataclass(frozen=True)
 class EquitySpec:
@@ -142,12 +191,20 @@ class CryptoSpec:
     listed_on: date
 
 
-#: The ten equity series per D-012: the seven indices Stooq still serves
-#: directly, plus three ETFs standing in for SPX/DJI/FTSE 100, whose Stooq
+#: The nine equity series of the headline panel: the seven indices Stooq still
+#: serves directly, plus the two ETFs standing in for SPX and DJI, whose Stooq
 #: symbols were retired in favour of unlicensed CFD proxies (docs/M1_REPORT.md
 #: §, docs/data_licenses.md). An ETF on the index is a *tradable* instrument
 #: with its own tracking error and its own session, not the index itself — that
 #: substitution is D-012's, and it is restated in every report this panel feeds.
+#:
+#: The FTSE 100 slot is **not** here: D-020 dropped it. Its only available
+#: instrument, ISF, starts 2015-03-04 — 52% of the longest equity series, and
+#: zero observations in the GFC window — so it could never contribute to the
+#: crisis arm that H3 is about, at any rolling window. Its spec and its
+#: ingestion path are kept in :data:`RETIRED_EQUITY`, so nothing about reading
+#: that file was thrown away; it is simply not part of the study's panel.
+#: With :data:`CRYPTO_PANEL` this makes the headline panel 11 assets.
 EQUITY_PANEL: dict[str, EquitySpec] = {
     "NDX": EquitySpec(
         asset_id="NDX",
@@ -214,15 +271,41 @@ EQUITY_PANEL: dict[str, EquitySpec] = {
         role="etf_proxy",
         proxy_for="Dow Jones Industrial Average",
     ),
+}
+
+#: Series that are ingestable but are not in the study's panel (D-020).
+#:
+#: Kept separate from :data:`EQUITY_PANEL` rather than deleted, because the two
+#: facts are different: "volbench can read this file" and "this series is in
+#: the panel". :func:`build_equity_series` still accepts these ids, so the
+#: ingestion path stays exercised end to end, while :func:`build_panel`
+#: iterates :data:`EQUITY_PANEL` alone and no run can pick one up by accident.
+RETIRED_EQUITY: dict[str, EquitySpec] = {
     "ISF": EquitySpec(
         asset_id="ISF",
         ticker="ISF.UK",
         relative_path="stooq/d_uk_txt/data/daily/uk/lse etfs/2/isf.uk.txt",
-        description="iShares Core FTSE 100 UCITS ETF",
+        description="iShares Core FTSE 100 UCITS ETF (D-020: not in the panel)",
         role="etf_proxy",
         proxy_for="FTSE 100",
     ),
 }
+
+
+def equity_spec(asset_id: str) -> EquitySpec:
+    """The :class:`EquitySpec` for ``asset_id``, panel or retired.
+
+    One lookup for both maps, so ingestion works for every series volbench
+    knows how to read while "the panel" stays exactly :data:`EQUITY_PANEL`.
+    """
+    if asset_id in EQUITY_PANEL:
+        return EQUITY_PANEL[asset_id]
+    if asset_id in RETIRED_EQUITY:
+        return RETIRED_EQUITY[asset_id]
+    raise KeyError(
+        f"unknown equity asset_id {asset_id!r}; panel: {sorted(EQUITY_PANEL)}, "
+        f"retired: {sorted(RETIRED_EQUITY)}"
+    )
 
 #: The crypto arm (D-004). Listing dates are Binance's spot listing for the
 #: USDT pairs; USDT stands in for USD (see :mod:`volbench.data.crypto`).
@@ -298,6 +381,49 @@ class PanelSeries:
     def primary(self) -> pd.Series:
         series: pd.Series = self.targets[self.primary_target]
         return series
+
+    @property
+    def invalid_target_days(self) -> int:
+        """Days whose primary target is NaN or non-positive (D-018).
+
+        The union of the two defects the report counts separately — bars whose
+        range targets were NaN'd, and days where the overnight term and
+        Rogers-Satchell are both exactly zero — because to a model fitting in
+        logs they are the same thing: a day with no usable variance.
+        """
+        return int(invalid_target_mask(self.primary.to_numpy(dtype=np.float64)).sum())
+
+    def fit_input(
+        self,
+        target: str | None = None,
+        *,
+        policy: InvalidTargetPolicy = DEFAULT_INVALID_TARGET_POLICY,
+    ) -> FitSeries:
+        """The variance series a model is fitted on, under D-018's policy.
+
+        This is the seam the invalid-target policy is implemented at: the
+        *series-loading* layer hands out an object that already knows which of
+        its days are unusable, so every adapter is protected by one
+        implementation and none of them has to sanitize its own input. What
+        comes back stays on the panel's full calendar and keeps its
+        ``DatetimeIndex``, so ``run_backtest`` can still check it against the
+        returns and the proxy day for day.
+
+        ``target`` defaults to the series' primary target — the close-to-close
+        estimator for equities (D-016), 5-minute realized variance for crypto
+        (D-004). It is a modelling contract, not an evaluation knob: what a
+        model is fed defines what it forecasts, and it does not change when
+        the cell is scored against a robustness proxy.
+
+        ``policy="none"`` returns the same series uncompacted, for the arm
+        that measures what compaction is worth.
+        """
+        name = target or self.primary_target
+        if name not in self.targets.columns:
+            raise KeyError(
+                f"{self.asset_id}: unknown target {name!r}; have {sorted(self.targets.columns)}"
+            )
+        return FitSeries.of(self.targets[name], policy=policy)
 
 
 def resolve_equity_path(spec: EquitySpec, raw_root: Path | str = DEFAULT_RAW_ROOT) -> Path:
@@ -468,9 +594,7 @@ def build_equity_series(
     ``[start, end]`` afterwards, so the first in-window day keeps a genuine
     previous close for its overnight term. Both operations look only backward.
     """
-    if asset_id not in EQUITY_PANEL:
-        raise KeyError(f"unknown equity asset_id {asset_id!r}; known: {sorted(EQUITY_PANEL)}")
-    spec = EQUITY_PANEL[asset_id]
+    spec = equity_spec(asset_id)
     path = resolve_equity_path(spec, raw_root)
 
     ingested = ingest_manual_csv(

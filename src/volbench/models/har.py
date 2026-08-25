@@ -16,6 +16,17 @@ full 22-day history, never a shorter, truncated one):
 
 fit via OLS (`np.linalg.lstsq`).
 
+Lag semantics under D-018 compaction: `t-1` is a POSITION in the series
+handed to `fit`, not a calendar day. The study's panel series are compacted
+(`volbench.compaction`) — days whose variance target is NaN or exactly zero
+are dropped, because `log(0)` is `-inf` and a single such day used to fail
+every training window containing it — so on those series the daily component
+may reach back two or more calendar days, and the weekly/monthly components
+span more than 5 and 22. That is the deliberate alternative to imputing a
+variance nobody measured, but it means "the last month of RV" is the last 22
+*measured* days. Where a series has no invalid days the two readings
+coincide exactly.
+
 Retransformation: fitting in logs and exponentiating the point forecast
 underestimates E[RV] (Jensen's inequality). We assume Gaussian residuals in
 log-space and apply the standard lognormal correction
