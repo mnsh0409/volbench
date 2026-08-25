@@ -21,6 +21,16 @@
 EXTRAS ?= --extra classical
 UV_RUN := uv run $(EXTRAS)
 
+# Byte-identity of `reproduce` is a claim within one numpy SIMD kernel family.
+# numpy's AVX-512-only float64 log/exp kernels differ from the x86-v3 ones in
+# the last bit for some inputs, which moves the content digest of a computed
+# proxy and with it every config hash (docs/P2_INTEGRATION.md §3.6). Pinning
+# to x86-v3-or-lower here and in CI makes an AVX-512 machine compute what the
+# committed identities were computed with; on a machine without AVX-512 the
+# setting is a silent no-op. Override with NPY_DISABLE_CPU_FEATURES= to measure
+# the difference on purpose.
+export NPY_DISABLE_CPU_FEATURES ?= X86_V4 AVX512_ICL AVX512_SPR
+
 TOY_FIXTURE := src/volbench/benchmarks/data/toy_asset_daily.csv
 TOY_OUT     := data/toy_benchmark
 

@@ -241,6 +241,49 @@ pandas release ever breaks a backend, it breaks there first and the override
 gets revisited instead of silently shipping. The override applies to every
 requirer at resolution time — that is its point and its risk.
 
+### 3.6 Found by CI at integration — byte-identity holds within a numpy SIMD kernel family
+
+Not in the brief; found because the widened CI trigger ran the suite on the
+branch. The pinned-identity test (`tests/test_recondition.py`) failed on the
+3.13 leg of the first CI run and on the 3.12 leg of the second, and passed
+on the 3.11 leg of the first — same commit, same lock, same fixture. The
+config dump added for the second run shows exactly one difference between an
+offending runner and this box: the **proxy's content digest**
+(`overnight_plus_range`, `0d312ed0…` here vs `5758b0a3…` there). The
+returns digest (also `np.log`), the fit-series digest, the spec, the splitter
+and the version are identical.
+
+Cause: numpy 2.x dispatches float64 `log`/`exp` to AVX-512-only SIMD kernels
+on machines that have them, and those are not bit-identical to the x86-v3
+(AVX2/FMA) kernels in the last ulp for some inputs. GitHub's `ubuntu-latest`
+pool mixes CPU generations, so which kernel a job gets is a lottery; the
+five logs per day in the range estimator hit a differing input where the 700
+return logs did not. This box (i9-13900KF, no AVX-512) computes with the v3
+kernels, and disabling them locally (`NPY_DISABLE_CPU_FEATURES=X86_V3`,
+falling back to the v2 baseline) leaves every digest unchanged — the v2/v3
+kernels agree on this data; the v4 ones do not. **M2's green CI on `main`
+was therefore runner luck**, not evidence of cross-ISA bit-identity.
+
+What this means and what was done:
+
+- Content digests of *computed* proxies (D-016's estimator is a computation
+  over the OHLC bars) are ISA-dependent at the last bit, so the byte-identity
+  `make reproduce` claims is a claim **within one numpy kernel family**, not
+  across every CPU. That is a property of IEEE arithmetic plus SIMD
+  dispatch, not of volbench, and it is now stated in `docs/design.md`
+  (invariant 3) rather than implied away.
+- CI and the Makefile's `reproduce` export
+  `NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL AVX512_SPR"`, which pins an
+  AVX-512 machine to the v3 kernels the committed identities were computed
+  with; on a machine without those features the setting is a silent no-op
+  (verified). The pinned identities are unchanged.
+- The cache-identity control is unaffected in the direction that matters:
+  a digest mismatch across machines makes the store *miss* (recompute), never
+  serve the wrong artefact. The cost is a false miss, not a false hit.
+- Scores are affected at the ~1e-16 level only; no ranking or reported
+  number in this report changes. The paper's grid should nonetheless be run
+  on one kernel family and say so (D-022).
+
 ## 4. The three uv mechanisms, reconciled
 
 Two streams introduced three resolver mechanisms independently. They now
@@ -544,10 +587,14 @@ real NKX 2020-10-01 bar, regression test on the panel branch.
 
 ### 9.3 CI
 
-Pushing `m2/p2-integration` triggers CI under the widened trigger; the run on
-the branch head and the run on the merge commit on `main` are recorded in
-the git history of this section (the CI result for a commit cannot be
-written into that same commit).
+Pushing `m2/p2-integration` triggered CI under the widened trigger.
+Run 32794688768 (`462799e`): 3.11 green, 3.13 **failed** on the pinned
+identities, 3.12 (see below). Run 32795672046 (`fb7ba7b`, with the config
+dump): 3.12 **failed** the same way and the dump located the cause — §3.6.
+The fix (kernel-family pin in CI and `make reproduce`) is the commit after
+this one; its run and the run on the merge commit on `main` are the
+evidence, recorded in the git history of this section since a commit cannot
+carry its own CI result.
 
 
 ## 10. Flagged for a human — not resolved here

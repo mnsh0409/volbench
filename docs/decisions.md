@@ -23,10 +23,16 @@ Revisit-if: …
 > against the planning log and renumber if it disagrees.
 
 > NUMBERING NOTE (added by the m2/p2-integration session, 2026-08-25):
-> D-017..D-021 below were appended from Claude Code at the Phase-2 core
+> D-017..D-022 below were appended from Claude Code at the Phase-2 core
 > integration (docs/P2_INTEGRATION.md), as CLAUDE.md permits when a task
 > instructs it. Numbers are provisional for the same reason as above — D-012
 > is still not mirrored here — and the planning machine reconciles them.
+
+## D-022 · 2026-08-25 · Byte-identity is claimed within one numpy SIMD kernel family; CI and `reproduce` pin x86-v3   [SETTLED]
+Decision: `make reproduce` and CI export `NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL AVX512_SPR"`, so every machine computes the toy benchmark's proxies with numpy's x86-v3-or-lower `log`/`exp` kernels — the family the committed identities were computed with. The determinism rule (CLAUDE.md 3) is restated as: same seed, same code, same data, **same kernel family** ⇒ byte-identical results and hashes. The paper's grid runs on one kernel family and says which.
+Why: found by CI at the Phase-2 integration (docs/P2_INTEGRATION.md §3.6). The pinned-identity test failed on some GitHub runners and passed on others for the same commit; the only difference was the content digest of the overnight-plus-range proxy, i.e. the last bit of `np.log` on an AVX-512 runner. Content digests of computed series are the cache-identity control and cannot be dropped; a mismatch across families causes a false cache *miss*, never a false hit, so correctness is unaffected — only the byte-identity claim needed qualifying. Disabling a feature the machine lacks is a silent no-op in numpy, so the pin is safe everywhere.
+Alternatives rejected: hashing the raw fixture bytes instead of the computed arrays (weakens the leakage control that a revised or longer series can never be served for this one); a correctly-rounded `log` (none in numpy); tolerating the failure as flaky (it is a real, explained difference).
+Revisit-if: numpy makes its SIMD transcendental kernels bit-identical across dispatch targets, or the grid moves to a machine class where the v3 kernels are unavailable.
 
 ## D-021 · 2026-08-25 · One log-to-variance retransformation, shared (`models/_rv.py`)   [SETTLED]
 Decision: every model that fits `log RV` and must return a *variance* (a mean, not a median) retransforms through `volbench.models._rv` — Duan (1983) smearing `exp(mu) * mean(exp(e_i))` over the fit window's in-sample residuals as the DEFAULT (`retransform="smearing"`), the Gaussian `exp(mu + sigma^2/2)` kept as the like-for-like arm against HAR. AutoETS, AutoARIMA, LightGBM and (since the integration) PatchTST use it; the choice is in `spec()` and in the model `name`, so the two arms can never collide onto one config hash. The factor is estimated once at the scheduled fit and never re-estimated by `update`.

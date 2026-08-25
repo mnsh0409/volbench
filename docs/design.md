@@ -559,7 +559,14 @@ the `package_version()` that enters every config hash.
 2. Every model output is a `Distribution`; no bare point arrays cross module
    boundaries. Pinned by `tests/test_model_interface.py`.
 3. Every result row carries seed + config hash; `make reproduce` regenerates
-   the toy benchmark from scratch.
+   the toy benchmark from scratch. **Byte-identity is a claim within one
+   numpy SIMD kernel family** (found at the Phase-2 integration,
+   docs/P2_INTEGRATION.md §3.6): numpy's AVX-512-only float64 `log`/`exp`
+   kernels differ from the x86-v3 ones in the last ulp for some inputs, which
+   moves the content digest of a computed proxy and every hash built on it.
+   CI and `make reproduce` pin the v3-or-lower family
+   (`NPY_DISABLE_CPU_FEATURES`); across families the store misses (recomputes)
+   rather than serving the wrong artefact.
 4. Scalers/feature transforms fit on train windows only, inside the splitter's
    contract.
 

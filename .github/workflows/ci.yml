@@ -11,6 +11,16 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Pin numpy to its x86-v3 (AVX2/FMA) SIMD kernels. numpy carries
+      # AVX-512-only float64 log/exp kernels that are not bit-identical to
+      # the v3 ones, and GitHub's runner pool mixes CPU generations, so the
+      # overnight-plus-range proxy — five logs per day — came back with a
+      # different content digest on an AVX-512 runner and every pinned toy
+      # config hash moved with it (docs/P2_INTEGRATION.md §3.6). Disabling a
+      # feature the runner lacks is a silent no-op, so this is safe on every
+      # runner; the Makefile's reproduce target exports the same value.
+      NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
     strategy:
       fail-fast: false
       matrix:
