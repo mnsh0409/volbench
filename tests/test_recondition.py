@@ -47,7 +47,7 @@ from volbench.benchmarks.toy import (
 )
 from volbench.dist import Distribution
 from volbench.evaluate import Recondition, run_backtest
-from volbench.results import build_config, config_hash
+from volbench.results import ResultsStore, build_config, canonical_repr, config_hash
 from volbench.splitter import RollingOriginSplitter
 
 N_ORIGINS = 200
@@ -272,7 +272,14 @@ class TestEquivalenceAtRefitEveryOne:
         daily = run_toy_benchmark(out_dir=tmp_path / "daily", refit_every=1, recondition="daily")
         frozen = run_toy_benchmark(out_dir=tmp_path / "none", refit_every=1, recondition="none")
 
-        assert daily.config_hashes == frozen.config_hashes == PINNED_CONFIG_HASHES
+        # On a mismatch, show the whole canonical config of one cell: whether
+        # the model spec, the data digests, the splitter or the version moved
+        # is the first thing anyone needs to know, and the hash alone hides it.
+        naive_config = ResultsStore(tmp_path / "daily").read_config(daily.config_hashes["naive"])
+        assert daily.config_hashes == frozen.config_hashes == PINNED_CONFIG_HASHES, (
+            "pinned identities moved; the naive cell's config on this machine is:\n"
+            + canonical_repr(naive_config)
+        )
         for label, digest in daily.config_hashes.items():
             a = (tmp_path / "daily" / f"{digest}.parquet").read_bytes()
             b = (tmp_path / "none" / f"{digest}.parquet").read_bytes()
