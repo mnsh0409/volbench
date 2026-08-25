@@ -34,6 +34,7 @@ panel's so the suite stays quick; the defects are not.
 from __future__ import annotations
 
 import math
+import pickle
 from typing import Any
 
 import numpy as np
@@ -305,6 +306,19 @@ class TestWindowIsTheLastNValidObservations:
         assert DEFAULT_INVALID_TARGET_POLICY == "compact"
         assert FitSeries.of(np.ones(5)).policy == "compact"
         assert FitSeries.raw(np.ones(5)).policy == "none"
+
+    def test_it_survives_a_process_boundary(self) -> None:
+        """``_BlockTask`` holds one of these and the Phase-3 executors pickle
+        it across processes and Slurm array tasks (D-011). A frozen dataclass
+        with a derived ``init=False`` field is exactly the shape that can come
+        back half-built, so the round trip is pinned rather than assumed."""
+        values = np.array([1.0, 0.0, 3.0, np.nan, 5.0, 6.0])
+        original = FitSeries.compact(values)
+        restored = pickle.loads(pickle.dumps(original))
+        assert restored.policy == original.policy
+        np.testing.assert_array_equal(restored.valid_positions, original.valid_positions)
+        train = np.arange(3, 6, dtype=np.int64)
+        np.testing.assert_array_equal(restored.window(train), original.window(train))
 
     def test_a_bad_policy_name_is_refused(self) -> None:
         with pytest.raises(ValueError, match="must be 'compact' or 'none'"):
