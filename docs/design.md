@@ -1,10 +1,15 @@
 # 04 · volbench API design
 
-> Status: **AS-BUILT at M1 (v0.1.0-m1)**. This file described the plan until
-> the three Phase 1 streams landed; it now describes what exists, with every
-> place the build diverged from the plan called out inline under
-> **Diverged:**. The planning-folder copy is now behind this one and needs
-> re-syncing from here, not the other way round.
+> Status: **AS-BUILT at the Phase-2 core integration (v0.3.0-p2core)**. This
+> file described the plan until the three Phase 1 streams landed; it now
+> describes what exists, with every place the build diverged from the plan
+> called out inline under **Diverged:**. Updated at M1, at M2
+> (`m2/evaluator-hardening`, `m2/cleanup`) and at the Phase-2 integration of
+> `feat/p2-models-classical`, `feat/p2-models-tsfm`, `feat/p2-inference` and
+> `feat/p2-data-panel` (docs/P2_INTEGRATION.md — all four streams flagged
+> this file's drift; it is reconciled here in one pass). The planning-folder
+> copy is behind this one and needs re-syncing from here, not the other way
+> round.
 
 ## Components
 
@@ -29,6 +34,16 @@
   common protocol:
   - `data/stooq.py` — `download_index(asset_id, ...)`, `ingest_manual_csv(...)`,
     `fetch_stooq_csv`, `parse_stooq_csv`, `STOOQ_INDEX_SYMBOLS`.
+    **Since `feat/p2-data-panel`:** `parse_stooq_csv` reads both the
+    per-symbol CSV export and the hand-downloaded bulk `d_*_txt` archive
+    layout (`<TICKER>,<PER>,<DATE>,...`, `YYYYMMDD` dates parsed with an
+    explicit format — as a bare integer `20050225` is a valid nanosecond
+    epoch); `ingest_manual_csv(expect_ticker=...)` refuses a file whose
+    declared `<TICKER>` is not the one asked for, and `ManualIngestResult`
+    carries `ticker`. **Since the Phase-2 integration:** `STOOQ_INDEX_SYMBOLS`
+    holds only the seven indices Stooq still serves as indices — the
+    SPX/DJI/FTSE entries that pointed at unlicensed CFD proxies are gone; the
+    asset list is `data/panel.py`'s, below.
   - `data/crypto.py` — `daily_realized_variance(asset_id, start, end, ...)`,
     `load_minute_bars`, `fetch_and_cache_day`, `CRYPTO_SYMBOLS`.
   - `data/byo.py` — `load_ohlc_csv`, `load_ohlc_parquet`.
@@ -41,8 +56,11 @@
 
 - **Proxies** (`data/proxies.py`) — pure functions, daily units, no hidden
   state: `squared_return`, `parkinson`, `garman_klass`,
-  `realized_variance_from_bars`, `log_returns`, and
-  `overnight_plus_range_variance`.
+  `realized_variance_from_bars`, `log_returns`, `overnight_plus_range_variance`
+  and — public since `feat/p2-data-panel` — its two pieces `overnight_variance`
+  (`(ln(O_t/C_{t-1}))^2`) and `rogers_satchell`. The D-016 target is literally
+  their sum, so the panel report's overnight-share decomposition cannot drift
+  from the estimator it decomposes.
 
   **Diverged (added at M1):** `log_returns` was not in the plan. The data layer
   exposed only `r^2`, but the models and the evaluator both speak in *signed*
@@ -56,6 +74,49 @@
   It is HAR's scoring target, since a range proxy alone omits the overnight
   variance HAR's forecast is scored against. First observation NaN (no
   `C_{t-1}`).
+
+- **The panel** (`data/panel.py`, `data/crisis.py`, `data/diagnostics.py`,
+  `data/build_panel.py`; added on `feat/p2-data-panel`) — the study's actual
+  asset list and how its targets are built, composed out of the adapters
+  above; nothing here re-implements parsing or an estimator.
+  - `EQUITY_PANEL` / `CRYPTO_PANEL` (`EquitySpec`, `CryptoSpec`): seven
+    indices Stooq still serves (NDX, DAX, CAC, NKX, HSI, TWSE, KOSPI) plus
+    the D-012 ETF stand-ins SPY/DIA/ISF for the SPX/DJI/FTSE-100 slots, and
+    BTC/ETH from Binance minute bars. `PANEL_START`/`PANEL_END` bound the
+    window; `build_equity_series`/`build_crypto_series`/`build_panel`
+    produce `PanelSeries`; `build_targets` the four daily variance targets
+    (`TARGET_NAMES`). Stooq is never fetched programmatically — the equity
+    arm reads hand-downloaded bulk archives under a `raw_root` outside the
+    repo (`tests/test_licensing_guard.py` asks git that the data trees stay
+    untracked). Targets are built on each file's full history and trimmed to
+    the window afterwards, so the first in-window day keeps a genuine
+    previous close (a backward-looking read of data that already existed).
+  - `repair_bars` / `BarQuality`: a bar must satisfy `low <= min(O,C) <=
+    max(O,C) <= high`; sub-1e-5 relative violations (decimal rounding) are
+    clamped and counted, larger ones (a close printed outside its own
+    session — two feeds disagreeing) are left as they are, flagged, and their
+    range-based targets set NaN. Nothing is dropped: the row survives so
+    `run_backtest` records a `missing_reason`.
+  - `crisis.py`: the D-004 sub-sample windows (`CRISIS_WINDOWS`,
+    `PENDING_WINDOWS`, `tag_dates`, `crisis_mask`, `crisis_table`) as
+    metadata about *dates*, applied to result rows after scoring. Its whole
+    public API takes only a `DatetimeIndex` and the module's AST is checked
+    for imports of the forecasting stack — a tag can never reach a model
+    (every window is defined by dates only knowable after the episode). The
+    2025-26 window is undated on purpose (D-004 fixes it at grid freeze).
+  - `diagnostics.py`: full-sample measurements of a built panel — correct for
+    a *report*, leakage in a *feature*; nothing consumes them. `crisis_coverage`
+    takes the union of `RollingOriginSplitter`'s own `test` indices rather than
+    re-deriving the arithmetic (the audit found the re-derivation off by one).
+  - `build_panel.py` regenerates `docs/PANEL_REPORT.md`; no figure in it is
+    hand-entered. Its findings (ISF starts 2015; the GFC arm is mostly inside
+    the warm-up; the overnight share is 33-51%, not the ~9-15% the toy
+    generator suggested; HSI's zero-variance days) are **decisions still
+    pending**, listed in `docs/P2_INTEGRATION.md` — none is applied here.
+
+  **Diverged:** the plan's `DataAdapter` protocol is still absent; the panel
+  is source-shaped composition over source-shaped adapters, which is the
+  honest description of what a `fetch(spec)` would have to hide.
 
 ### Forecasting — `volbench.dist`, `volbench.models`
 
@@ -138,7 +199,57 @@
   **Diverged:** `GARCH.fit` never raises on optimizer failure; it falls back to
   EWMA on the same window and records `fallback=True`. HAR, by contrast, *does*
   raise on a degenerate input (non-positive RV, short window). The two models
-  disagree about whether a bad origin should be survivable.
+  disagree about whether a bad origin should be survivable. Every Phase-2
+  model sides with HAR (raise; the evaluator records the origin as a
+  `fit_error@` row).
+
+- **Classical log-RV models** (`models/sf.py`, `models/lgbm.py`, added on
+  `feat/p2-models-classical`): `AutoETSRV` (statsforecast `AutoETS`, pinned
+  `model="AZN"`, `season_length=1`), `AutoARIMARV` (Hyndman-Khandakar
+  stepwise, `aicc`/`kpss`, no approximation — every search setting in
+  `spec()`) and `LightGBMRV` (L2 boosting of `log RV_{t+1}` on lags 1..22 of
+  log RV plus HAR's weekly and monthly aggregates — 24 features, so a
+  HAR-equivalent linear function exists inside the feature set). All three
+  fit on the realized-variance series like HAR and emit `Normal(0,
+  sqrt(vhat))`.
+  - **One retransformation, shared** (`models/_rv.py`): a model fit in logs
+    forecasts `E[log RV]`, and `exp(·)` of that is a median. `_rv` implements
+    Duan's (1983) smearing factor `mean(exp(e_i))` over the fit window's
+    in-sample residuals (the DEFAULT, `retransform="smearing"`) and the
+    Gaussian `exp(σ²/2)` (`retransform="gaussian"`, the like-for-like arm
+    against HAR), both config-hashed and both in the model `name`. Smearing
+    is the default because docs/M2_NOTES.md measured the Gaussian correction
+    over-inflating on the noisy overnight-plus-range target. Since the
+    Phase-2 integration `PatchTST` retransforms through the same module (it
+    had carried a local copy). HAR itself still uses its own Gaussian
+    `resid_var` correction — *open* (below).
+  - **`SupportsUpdate` is implemented, exactly.** statsforecast's `forward`
+    re-filters at fixed parameters (`ets_f(y, model=fitted)` /
+    `Arima(x, model=fitted)`; the ETS h-step variance is read from the
+    scheduled fit's own `predict`, never from `forward`, which would
+    re-estimate the innovation variance). Note the modelling property: the
+    filter re-runs over the whole new window from the initial state of the
+    last fit — not carried forward — which is what R does and is immaterial
+    at 500-observation windows. LightGBM's `update` moves the RV buffer under
+    fixed trees, which *is* re-conditioning for a deterministic feature map.
+  - **LightGBM temporal integrity:** every feature row is a function of
+    `rv[t-21..t]` only, built from the window handed to `fit`/`update`; there
+    is no scaler, no early stopping and no validation split — each of those
+    is a documented leak in a boosted-tree pipeline, and their absence is
+    asserted (a window's design matrix is bit-identical whether or not the
+    array continues afterwards). `deterministic=True`, `force_row_wise=True`,
+    `num_threads=1`, one seed: bit-identical forecast and byte-identical
+    serialized model, pinned.
+  - **Open — in-sample smearing optimism (LightGBM):** an ensemble shrinks
+    its own residuals, and a shrunken residual set drives Duan's factor to 1,
+    turning the variance forecast back into a median. At LightGBM's stock
+    shape the in-sample log-space residual variance was 0.015 against a
+    realized one-step forecast-error variance of 0.42 (factor 1.008 vs
+    HAR's 1.207). The shipped defaults (100 rounds, 4 leaves,
+    `min_data_in_leaf=60`, `lambda_l2=5`) land at **0.28 vs 0.38** — an
+    optimism of HAR's order, bounded by a regression test that fails if the
+    capacity is raised. Not eliminated: an **out-of-fold factor** is the
+    honest fix and a Phase-2 modelling decision (docs/P2_INTEGRATION.md).
 
 - **Zero-shot foundation models** (`models/tsfm_*.py`, added on
   `feat/p2-models-tsfm`): `Chronos` (Chronos-Bolt by default, Chronos-2 by
@@ -161,7 +272,20 @@
     irrelevant to these models (every origin is one forward pass either way).
   - `input_scale` (default `1e4`, variance in percent-squared) is a fixed unit
     convention in `spec()`, forced by Moirai-2's scaler epsilon (`sqrt(var +
-    1e-5)`), which flattens a ~1e-4-level series into a constant.
+    1e-5)`), which flattens a ~1e-4-level series into a constant (measured:
+    at raw units Moirai's q10-q90 spread collapses below 5% of the level; at
+    1e4 it exceeds 50% and is stable from there upward). Chronos and TimesFM
+    are indifferent to it; it is applied to all four so the contract has one
+    unit.
+  - **Known, bounded bias — the grid mean.** The mean of a quantile grid with
+    flat tails *truncates* the tails of the model's own predictive law: the
+    estimator is the same one that understated a Student-t GARCH's variance
+    by ~8% at nu=5 / ~24% at nu=3 (M1 report §4.2, D-014), and here the grid
+    is what the checkpoint emits (9 levels for Chronos-Bolt/Moirai, 21 for
+    Chronos-2, 0.1..0.9 for TimesFM), so no parametric object exists to read
+    a closed-form mean from. The bias is downward and monotone in the tail
+    mass outside the outer quantiles. **Revisit if TSFM QLIKE looks odd**
+    relative to the econometric models (docs/P2_INTEGRATION.md §3).
   - `spec()` carries checkpoint id, the resolved commit hash of the weights,
     dtype, and package versions, so the config hash moves with the weights.
     Chronos-Bolt/2, TimesFM 2.5 and Moirai-2 emit quantiles directly — no
@@ -183,8 +307,11 @@
   `Normal(0, sqrt(vhat))`. Deterministic by construction (explicit-matmul
   attention, `use_deterministic_algorithms`, seeded batches/dropout) and
   pinned bit-identical twice on CPU and GPU; across devices, dropout draws
-  from each device's own RNG stream, so results reproduce per device class
-  (with `dropout=0` CPU and GPU agree to ~1e-8), and `device` is not hashed. **No `update`:** re-conditioning
+  from each device's own RNG stream, so results reproduce **per device
+  class** (with `dropout=0` CPU and GPU agree to ~1e-8), and `device` is not
+  hashed — which means two fragments with one config hash, computed on a
+  CPU and on a GPU, can legitimately differ. The paper's PatchTST numbers
+  must therefore state the device class. **No `update`:** re-conditioning
   a trained net without re-estimation is not well defined, so it runs frozen
   between refits and `conditioned_through == fit_origin` on every row.
   Training windows are cut from the fit array only (last target = the
@@ -193,10 +320,27 @@
   **Diverged:** the plan's model list names these as adapters of a generic
   kind; as built they are RV-fed, like HAR, not return-fed — the same
   type-uniform / meaning-divergent interface noted for HAR above, now shared
-  by five models. Optional deps live under the `tsfm` extra and are never
-  installed in CI: `tests/conftest.py` skips `tsfm`/`timegpt`-marked tests
-  by default and unconditionally under `CI`, while each adapter keeps a
+  by eight models. Optional deps live under the `tsfm` extra and are never
+  installed in CI: `tests/conftest.py` skips `tsfm`/`timegpt`/`gpu`-marked
+  tests by default and unconditionally under `CI`, while each adapter keeps a
   mocked-backend test in the default suite.
+
+- **Optional backends — one rule** (Phase-2 integration; the two model
+  streams had chosen differently): every adapter is re-exported from
+  `volbench.models` and `volbench`, and every optional backend
+  (statsforecast, lightgbm, torch, chronos, timesfm, uni2ts, nixtla) is
+  imported *inside* `fit`, so `import volbench` needs no extra
+  (`tests/test_optional_backends.py` runs the import with the backends
+  blocked). Three extras: `classical` (statsforecast + lightgbm; cheap, on
+  every CI leg), `tsfm` (CUDA torch 2.5.1+cu121 pinned for the 4090 box's
+  driver, plus the foundation-model packages; never in CI) and `torch-cpu`
+  (the same torch, CPU wheels, for CI's 2-epoch PatchTST smoke test;
+  declared to conflict with `tsfm`). The Makefile's `EXTRAS` variable
+  selects them because `uv run --extra` syncs the environment to exactly the
+  extras named. `pyproject.toml`'s `[tool.uv]` block documents the three
+  resolver mechanisms (override-dependencies for stale upper bounds,
+  dependency-metadata for uni2ts's torch cap that an override cannot lift,
+  conflicts/sources/indexes for the two torch builds).
 
 ### Splitting — `volbench.splitter`
 
@@ -264,8 +408,8 @@ Settled after M1 report §4.3 (open at M1, implemented on
 
   **Diverged:** the plan had an **`Evaluator`** class consuming
   `(Distribution, realized target)` streams. As built it is a function over a
-  whole cell, and DM/MCS on the score matrix is **not implemented** — the
-  comparison-inference half of the plan is Phase 2.
+  whole cell; the comparison-inference half lives in two separate modules
+  (below) that only *consume* its rows.
 
   **Diverged:** nothing is ever dropped. An unscorable row is emitted with NaN
   and a `missing_reason` naming every cause, so a model cannot look good by
@@ -296,6 +440,38 @@ Settled after M1 report §4.3 (open at M1, implemented on
   for `Empirical`, exact-for-the-interpolant for `QuantileGrid`, quadrature
   otherwise.
 
+- **`volbench.inference`** (added on `feat/p2-inference`) — "who wins?" over
+  loss arrays / `ResultsStore` rows; touches nothing on the scored path.
+  `diebold_mariano` (rectangular or Bartlett window truncated at `h-1`, the
+  Harvey-Leybourne-Newbold small-sample factor, `t_{n-1}`; DM's own rule for
+  a non-positive variance estimate, flagged; at `h=1` exactly the one-sample
+  t, pinned; size checked by simulation). `model_confidence_set` (Hansen,
+  Lunde & Nason 2011; `T_R` default per their corrigendum or `T_max`;
+  moving-block bootstrap by hand with contiguous forward-running blocks and
+  **no wrap-around**; Politis-White automatic block length mirrored from and
+  pinned against `arch.bootstrap.optimal_block_length`; `B=10 000`,
+  `alpha=0.10`; MCS p-values as cumulative maxima). `loss_matrix` /
+  `dm_matrix` / `compare_models` return the MCS together with the pairwise
+  DM matrix, whose p-values are *not* multiplicity-corrected — the MCS is
+  the primary tool. Rows with a `missing_reason` are dropped pairwise-
+  complete (DM) / listwise (MCS) and `n_dropped` is recorded; from a store,
+  cells must share the same series bytes before their origins are aligned.
+  Every result carries a `config_hash` over its inputs and settings and the
+  bootstrap takes a mandatory `seed`.
+
+- **`volbench.backtests`** (added on `feat/p2-inference`) — VaR/ES backtests
+  on the `hit_<level>` / `var_<level>` / `realized_return` columns:
+  `kupiec_pof` (with the `0·log 0` convention), `christoffersen`
+  (independence and conditional coverage from first-order Markov transition
+  counts, conditional on the first observation so `LR_cc = LR_uc + LR_ind`
+  holds exactly; a NaN hit removes its neighbouring transitions rather than
+  splicing across the gap), `fz0_loss` (Patton, Ziegel & Chen 2019 eq. 6,
+  domain enforced, pinned against their Figure 1/2 and the `L(kY,kv,ke) =
+  L + log k` identity), `expected_shortfall` (closed forms for `Normal` /
+  `StudentT`, exact for `Empirical`/`QuantileGrid`, quadrature otherwise)
+  and `var_backtest` for one cell at one level. Below 10 expected
+  exceedances a `SmallSampleWarning` names both `n` and `expected_hits`.
+
 - **`ResultsStore`** (`results.py`) — append-only parquet, one fragment per
   `config_hash` plus a JSON config sidecar, written through a temp file and
   `os.replace`. `has()` is a file-existence check, so a cache hit skips the
@@ -323,8 +499,16 @@ Settled after M1 report §4.3 (open at M1, implemented on
 ### Benchmarks — `volbench.benchmarks`
 
 **Added beyond the plan.** `benchmarks/toy.py` composes all three streams over
-a synthetic series: at M2, **5** baselines (naive, EWMA, GARCH, GARCH-t, HAR) ×
-200 rolling origins, ~5s, byte-identical across runs. The scoring target is a
+a synthetic series: since the Phase-2 integration, **8** models — the five
+of M2 (naive, EWMA, GARCH, GARCH-t, HAR) plus AutoETS, AutoARIMA and
+LightGBM on the log-RV series — × 200 rolling origins, ~1 minute, byte-
+identical across runs; the three classical models are the *cheap* Phase-2
+additions and the only ones in `make reproduce`. `benchmarks/smoke_tsfm.py`
+(`make smoke-tsfm`) runs Chronos, TimesFM, Moirai and PatchTST over the same
+fixture, splitter and target into their own `ResultsStore`
+(`data/smoke_tsfm/`), local-only and never in CI or `reproduce`: it needs the
+`tsfm` extra, cached weights and a GPU. Both runs fail by name if an extra is
+missing rather than recording 200 `fit_error` rows. The scoring target is a
 property of the run, never of a model: every cell scores QLIKE against
 `overnight_plus_range_variance` (D-016), with Parkinson available as a labeled
 robustness arm behind the `target` flag; HAR's *fit input* is always the
@@ -342,19 +526,27 @@ their M1 hashes and are never overwritten.
 
 `volbench` (root) exports the shared vocabulary and the entry points:
 `Distribution`/`Normal`/`StudentT`/`Empirical`/`QuantileGrid`, `TimeSeriesFrame`, the
-proxies and `log_returns`, `Origin`/`RollingOriginSplitter`, the four baseline
-model classes and their fitted types, the four zero-shot adapters
+proxies (`log_returns`, `overnight_variance` and `rogers_satchell` included),
+`Origin`/`RollingOriginSplitter`, every model adapter and its fitted type —
+the four baselines, `AutoETSRV`/`AutoARIMARV` (`FittedStatsForecastRV`),
+`LightGBMRV` (`FittedLightGBMRV`), the four zero-shot adapters
 (`Chronos`/`TimesFM`/`Moirai`/`TimeGPT`, fitted type `FittedTSFM`; their
 shared base `ZeroShotRVModel`, `TSFMBackend` and `TimesFMForecastOptions`
-stay in `volbench.models`), `PatchTST`/`FittedPatchTST`, plus
-`ForecastModel`/`FittedModel`,
+stay in `volbench.models`, as does the private `_rv`), `PatchTST`/
+`FittedPatchTST` — plus `ForecastModel`/`FittedModel`,
 `run_backtest`/`forecast_moments`/`DEFAULT_LEVELS`/`SupportsUpdate`/
 `ModelFactory`, `ResultsStore` and the config-hash helpers,
-`Executor`/`SerialExecutor`, and `mse`/`qlike`/`pinball`.
+`Executor`/`SerialExecutor`, `mse`/`qlike`/`pinball`, and — since the
+Phase-2 integration — the inference entry points (`diebold_mariano`,
+`model_confidence_set`, `loss_matrix`, `dm_matrix`, `compare_models` and
+their result types) and the VaR-backtest ones (`kupiec_pof`,
+`christoffersen`, `fz0_loss`, `expected_shortfall`, `var_backtest` and their
+result types).
 
 Per-source ingestion — the Stooq and Binance downloaders, their error types and
-symbol maps, and the bring-your-own-data loaders — stays in `volbench.data`.
-Which source a series came from is a provenance question
+symbol maps, the bring-your-own-data loaders — and the study's own panel
+assembly (`panel`, `crisis`, `diagnostics`, `build_panel`) stay in
+`volbench.data`. Which source a series came from is a provenance question
 (`docs/data_licenses.md`), not part of the library's vocabulary.
 
 `__version__` is read from installed package metadata, so it cannot drift from
@@ -420,3 +612,26 @@ the guard, and keeps its own index assertion as a redundant belt.
 - [ ] R interop (rugarch) — subprocess adapter or drop?
 - [ ] A `DataAdapter` protocol, and machine-readable licence metadata that
       packaging can actually enforce.
+- [ ] **Out-of-fold smearing factor for LightGBM** (and, in principle, any
+      high-capacity log-RV model): the in-sample factor is optimistic by a
+      bounded, measured amount (0.28 vs 0.38 log-space variance). An
+      out-of-fold estimate inside the training window is the fix; it must be
+      a *temporal* fold, never a random one.
+- [ ] **HAR's retransformation** is still its own Gaussian `resid_var`
+      correction while every Phase-2 log-RV model goes through `_rv`; moving
+      HAR onto `_rv` (smearing default) is a modelling change that would
+      move its hash and its numbers, so it is not an integration side effect.
+- [ ] **TSFM grid-mean truncation** — the same family as D-014's bug, now on
+      the checkpoint's own grid where no parametric object exists. Revisit if
+      TSFM QLIKE looks odd; tail-extrapolation of the grid would be a patch on
+      a lossy representation, the same objection D-014 recorded.
+- [ ] **PatchTST per-device-class reproducibility** — `device` is unhashed,
+      so a CPU and a GPU fragment can share a hash and differ; whether to hash
+      the device class, or to pin the paper's runs to one, is a protocol call.
+- [ ] **Pending protocol decisions the panel report raised** (deliberately not
+      made at integration): the invalid-target policy (HSI's zero-variance
+      days and the inconsistent bars — NaN them, floor them, let HAR fail, or
+      drop the series), the rolling-window length (the GFC arm is mostly
+      inside the 500-observation warm-up), and whether the FTSE-100 slot (ISF,
+      history from 2015 only) is dropped. Each ships in a dedicated follow-up
+      against the merged tree.

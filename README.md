@@ -48,23 +48,27 @@ make reproduce      # checks, then rebuilds the toy benchmark from scratch
 ## Development
 
 ```bash
-uv sync
-uv run pytest
-uv run ruff check .
-uv run mypy
+uv sync --dev --extra classical          # + --extra torch-cpu (CI) or --extra tsfm (GPU box)
+make check                               # ruff, mypy --strict, pytest; EXTRAS="..." to change the extras
+make smoke-tsfm                          # local only: foundation models + PatchTST on the toy series
 ```
 
-**Built (Phase 1):** data adapters with explicit licensing (`volbench.data`),
-daily variance proxies, baseline models (naive, EWMA, GARCH/GJR-GARCH, HAR-RV),
+**Built (Phase 1 + Phase 2 core, v0.3.0):** data adapters with explicit
+licensing and the D-004/D-012 evaluation panel (`volbench.data`), daily
+variance proxies, thirteen model adapters — naive, EWMA, GARCH/GJR-GARCH,
+HAR-RV, AutoETS/AutoARIMA (statsforecast), LightGBM, PatchTST, and the
+zero-shot foundation models Chronos, TimesFM, Moirai and TimeGPT —
 rolling-origin backtesting with CRPS / log score / QLIKE / pinball / VaR hits,
-a content-addressed results store, and a serial execution seam.
+the comparison-inference suite (Diebold–Mariano, Model Confidence Set) and
+VaR/ES backtests (Kupiec, Christoffersen, FZ0 loss), a content-addressed
+results store, and a serial execution seam. Optional backends live in the
+`classical`, `tsfm` and `torch-cpu` extras (see the `Makefile`).
 
-**Roadmap (paper §3–§5):** more model adapters (statsforecast, LightGBM,
-PatchTST, Chronos/TimesFM/Moirai/TimeGPT); the comparison-inference suite
-(Fissler–Ziegel, Kupiec, Christoffersen, Diebold–Mariano, Model Confidence Set,
-economic value); and the scalable runner (process-parallel and Slurm-array
-executors, GPU batching). See `docs/M1_REPORT.md` for what is and is not built,
-and `docs/design.md` for the as-built API.
+**Roadmap (paper §3–§5):** the scalable runner (process-parallel and
+Slurm-array executors, GPU batching), the full-panel grid, and economic-value
+evaluation. See `docs/P2_INTEGRATION.md` for what is and is not built after
+Phase 2, `docs/M1_REPORT.md` for Phase 1, and `docs/design.md` for the
+as-built API.
 
 ## License
 
