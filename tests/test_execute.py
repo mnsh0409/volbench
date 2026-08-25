@@ -16,6 +16,7 @@ to be a claim about anything.
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator
 from typing import Any
 
@@ -174,6 +175,50 @@ class TestForkIsRefusedWhereItWouldHang:
         import lightgbm  # noqa: F401
 
         assert ProcessExecutor(workers=2).map(double, [1, 2]) == [2, 4]
+
+
+class TestWorkersMustBeAbleToImportMain:
+    """Every start method other than ``fork`` re-imports the parent's
+    ``__main__`` in each worker, so a REPL, ``python -`` or a heredoc cannot
+    host a pool. Left alone that arrives as ``BrokenProcessPool`` with a
+    ``FileNotFoundError: '<stdin>'`` buried in a worker traceback, which says
+    nothing about what to do; the guard says it up front."""
+
+    def test_a_session_without_an_importable_main_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from types import ModuleType
+
+        from volbench.execute import _require_importable_main
+
+        stdin_main = ModuleType("__main__")
+        stdin_main.__file__ = "<stdin>"
+        monkeypatch.setitem(sys.modules, "__main__", stdin_main)
+
+        with pytest.raises(RuntimeError, match="import this process's __main__"):
+            _require_importable_main("forkserver")
+        # The message has to name both ways out, or it is only half a diagnosis.
+        with pytest.raises(RuntimeError, match="if __name__"):
+            _require_importable_main("spawn")
+        with pytest.raises(RuntimeError, match="start_method='fork'"):
+            _require_importable_main("spawn")
+
+    def test_fork_needs_no_importable_main(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """It inherits the interpreter rather than rebuilding it, which is the
+        one thing plain fork is unambiguously better at."""
+        from types import ModuleType
+
+        stdin_main = ModuleType("__main__")
+        stdin_main.__file__ = "<stdin>"
+        monkeypatch.setitem(sys.modules, "__main__", stdin_main)
+        monkeypatch.delitem(sys.modules, "lightgbm", raising=False)
+
+        assert ProcessExecutor(workers=2, start_method="fork").map(double, [5]) == [10]
+
+    def test_a_real_script_or_module_passes(self) -> None:
+        from volbench.execute import _require_importable_main
+
+        _require_importable_main("forkserver")  # pytest's own __main__ is a file
 
 
 class TestKernelFamily:

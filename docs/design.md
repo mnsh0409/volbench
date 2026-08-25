@@ -656,6 +656,14 @@ Settled after M1 report §4.3 (open at M1, implemented on
     process, because a pool-backed executor nested in a bounded pool deadlocks
     — and a deadlock is indistinguishable from a slow grid until someone kills
     it. The runner hands every cell a `SerialExecutor` for its refit blocks.
+  - **The start method is `forkserver`, on measurement** (D-028): a parent that
+    has trained a LightGBM model and then plain-`fork`s produces workers that
+    deadlock on their first LightGBM call, because OpenMP's locks are copied
+    mid-flight. `fork` stays available, faster to start, and is *refused* in a
+    process that has already used a backend in `FORK_UNSAFE_MODULES`. The
+    spawn-family methods are likewise refused where `__main__` is not
+    importable (a REPL, `python -`, a heredoc) — both failure modes are
+    messages rather than a hang or a `BrokenProcessPool`.
 
   `ProcessExecutor` knows nothing about GPUs. Serializing GPU-bound cells is
   the runner's job, from explicit configuration (below).

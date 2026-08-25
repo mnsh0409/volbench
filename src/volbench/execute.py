@@ -234,6 +234,30 @@ def _init_worker(env: dict[str, str | None]) -> None:
     _IN_WORKER = True
 
 
+def _require_importable_main(start_method: str) -> None:
+    """Refuse a spawn-family pool where its workers could not start.
+
+    Every start method other than ``fork`` re-imports the parent's ``__main__``
+    in each worker, so a session whose ``__main__`` is not a file on disk — a
+    REPL, ``python -``, a heredoc — cannot host one. Left alone that surfaces as
+    ``BrokenProcessPool`` with a ``FileNotFoundError: '<stdin>'`` buried in the
+    worker's traceback, which says nothing about what to do next.
+    """
+    main = sys.modules.get("__main__")
+    if getattr(main, "__spec__", None) is not None:
+        return
+    path = getattr(main, "__file__", None)
+    if path is not None and os.path.isfile(path):
+        return
+    raise RuntimeError(
+        f"start_method={start_method!r} needs a worker to be able to import this process's "
+        f"__main__, and it is {path!r} — a REPL, `python -`, or a heredoc. Run the grid from "
+        "a script or module with the usual `if __name__ == \"__main__\":` guard, or pass "
+        "start_method='fork' (faster, and safe as long as this process has not itself fitted "
+        f"a model with an OpenMP backend: {list(FORK_UNSAFE_MODULES)})."
+    )
+
+
 @dataclass(frozen=True)
 class _Payload:
     """One unit of work plus the parent's kernel signature to check against."""
@@ -316,6 +340,8 @@ class ProcessExecutor:
                 "pool has to hand its refit blocks a SerialExecutor, or a bounded pool "
                 "deadlocks waiting on itself."
             )
+        if self.start_method != "fork":
+            _require_importable_main(self.start_method)
         if self.start_method == "fork":
             used = [name for name in FORK_UNSAFE_MODULES if name in sys.modules]
             if used:

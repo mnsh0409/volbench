@@ -167,6 +167,15 @@ Consequences, both taken (D-028):
 There is deliberately **no test that reproduces the deadlock**; a hanging test
 is worse than the bug. `TestForkIsRefusedWhereItWouldHang` pins the guard.
 
+The new default has one cost, and it is also turned into a message: every start
+method other than `fork` re-imports the parent's `__main__` in each worker, so
+a REPL, `python -` or a heredoc cannot host a pool. Unguarded that arrives as
+`BrokenProcessPool` with a `FileNotFoundError: '<stdin>'` buried in a worker's
+traceback; `_require_importable_main` refuses it up front and names both ways
+out (a script with the usual `if __name__ == "__main__":` guard, or `fork`).
+The README's grid snippet is run verbatim as a script as part of this branch's
+checks, so the documented usage is the tested one.
+
 ---
 
 ## 6. Found while measuring — the OpenBLAS thread count changes GARCH's numbers
