@@ -723,17 +723,23 @@ All on this box (RTX 4090, driver 535, torch 2.5.1+cu121 in the 3.11 venv;
 
 | Leg | Extras | ruff | mypy --strict | pytest |
 |---|---|---|---|---|
-| 3.11 | classical + tsfm | clean | clean, 41 files | **1040 passed, 29 skipped**, 7 m 21 s |
+| 3.11 | classical + tsfm | clean | clean, 41 files | **1042 passed, 29 skipped**, 7 m 24 s |
 | 3.12 (`CI=true`) | classical + torch-cpu | clean | clean | **1037 passed, 35 skipped**, 7 m 19 s |
 | 3.13 (`CI=true`) | classical + torch-cpu | clean | clean | **1037 passed, 35 skipped**, 7 m 04 s |
 | 3.11 opt-in (`VOLBENCH_RUN_TSFM=1 VOLBENCH_RUN_GPU=1 -m "tsfm or gpu or timegpt"`) | classical + tsfm | — | — | **29 passed, 1 skipped** (TimeGPT: no `NIXTLA_API_KEY`, by design) |
 
-The suite grew by 106 tests, 41 of them the new `tests/test_compaction.py`.
-The 3.12/3.13 legs ran three tests fewer because they were collected before
-the last two commits (a pickle round-trip and an immutability regression);
-CI re-ran the whole matrix on the final tree, which is the authoritative
-matrix result (§12.3). The larger skip count on 3.12/3.13 is the
+The suite grew by 108 tests, 43 of them the new `tests/test_compaction.py`.
+The 3.12/3.13 legs ran five tests fewer because they were collected before the
+last commits; CI re-ran the whole matrix on the final tree, which is the
+authoritative matrix result (§12.3). The larger skip count on 3.12/3.13 is the
 `tsfm`-marked set, which `CI=true` never honours.
+
+Two of the 3.11 tests do not run anywhere else, by design:
+`test_the_real_panel_series_keep_every_origin` re-checks D-018 on the **real**
+HSI and TWSE archives (1.4 s each) and skips wherever they are not unpacked —
+and always under `CI`, since they are hand-downloaded and never committed. The
+mechanism-faithful fixtures in the same file carry the contract for CI; this
+one keeps §11.3's numbers re-runnable rather than quoted.
 
 `make reproduce` at 0.4.0: green, and the eight fragments **byte-identical**
 across two from-scratch rebuilds (results directory deleted, fixture

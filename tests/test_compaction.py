@@ -34,7 +34,9 @@ panel's so the suite stays quick; the defects are not.
 from __future__ import annotations
 
 import math
+import os
 import pickle
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -725,6 +727,59 @@ class TestPanelDefectsEndToEnd:
         pd.testing.assert_frame_equal(compacted[scores], uncompacted[scores])
         # ... except the identity, which records the policy on purpose.
         assert compacted.attrs["config_hash"] != uncompacted.attrs["config_hash"]
+
+
+# --------------------------------------------------------------------------
+# the real archives, where they exist
+# --------------------------------------------------------------------------
+
+RAW_ROOT = Path(__file__).parents[1] / "data" / "raw"
+CACHE_ROOT = Path(__file__).parents[1] / "data" / "cache"
+
+#: The real HSI and TWSE series are the two D-018 was decided on, and the
+#: numbers in docs/decisions.md and docs/P2_INTEGRATION.md §11.3 come from
+#: them. The archives are hand-downloaded and never committed
+#: (docs/data_licenses.md), so this can only run where a human has unpacked
+#: them — never in CI, which is also where it must never run: the fixtures
+#: above reproduce the same two defects by mechanism and carry the contract.
+_HAS_ARCHIVES = RAW_ROOT.is_dir() and not os.environ.get("CI")
+
+
+@pytest.mark.skipif(not _HAS_ARCHIVES, reason=f"needs the Stooq archives under {RAW_ROOT}")
+@pytest.mark.parametrize(
+    ("asset", "expected_invalid"), [("HSI", 13), ("TWSE", 80)]
+)
+def test_the_real_panel_series_keep_every_origin(asset: str, expected_invalid: int) -> None:
+    """D-018 on the data it was decided on, not on a reconstruction.
+
+    HSI's 13 invalid days (12 exactly-zero targets plus one NaN'd bar) and
+    TWSE's 80 are the counts docs/PANEL_REPORT.md §3-§4 measures. Compacted,
+    HAR forecasts at every origin of both and the only flagged rows are the
+    ones whose own target is unmeasurable.
+    """
+    from volbench.data.panel import FIT_WINDOW_DEFAULT, build_equity_series
+
+    series = build_equity_series(asset, raw_root=RAW_ROOT, cache_root=CACHE_ROOT)
+    primary = series.primary.iloc[1:]
+    returns = log_returns(series.frame.close).iloc[1:]
+    assert series.invalid_target_days == expected_invalid
+
+    frame = run_backtest(
+        HAR,
+        returns,
+        primary,
+        RollingOriginSplitter(window=FIT_WINDOW_DEFAULT, horizon=1, refit_every=REFIT_EVERY),
+        seed=SEED,
+        asset=asset,
+        proxy_name="overnight_plus_range",
+        fit_series=FitSeries.compact(primary),
+    )
+    assert len(frame) > 4000
+    assert _failed(frame) == 0, "every origin must be fittable under compaction"
+
+    invalid = invalid_target_mask(primary.to_numpy(dtype=np.float64))
+    flagged = frame["missing_reason"].astype(str) != ""
+    assert int(flagged.sum()) == int(invalid[frame["target_index"].to_numpy()].sum())
 
 
 # --------------------------------------------------------------------------
