@@ -27,16 +27,47 @@ variance nobody measured, but it means "the last month of RV" is the last 22
 *measured* days. Where a series has no invalid days the two readings
 coincide exactly.
 
-Retransformation: fitting in logs and exponentiating the point forecast
-underestimates E[RV] (Jensen's inequality). We assume Gaussian residuals in
-log-space and apply the standard lognormal correction
-E[RV] = exp(y_hat + 0.5 * resid_var), with resid_var estimated from the
-fit's own in-sample residuals (never from held-out data).
+Retransformation — through `volbench.models._rv`, smearing by default (D-030)
+=============================================================================
+Fitting in logs and exponentiating the point forecast estimates the
+conditional *median* of RV, and a variance forecast is a *mean* (Jensen).
+HAR uses the same two-armed correction as every other log-RV model in this
+package — `models/sf.py`, `models/lgbm.py`, `models/patchtst.py` — from
+`volbench.models._rv`:
+
+- ``retransform="smearing"`` (DEFAULT): Duan (1983),
+  ``RV_hat = exp(mu_hat) * mean_i(exp(e_i))`` over the fit window's in-sample
+  residuals. Nonparametric: it reads the correction off the residuals instead
+  of assuming their shape.
+- ``retransform="gaussian"``: ``exp(mu_hat + sigma^2/2)`` with ``sigma^2`` the
+  in-sample residual variance. This was HAR's only behaviour up to v0.4.0 and
+  is kept as the like-for-like arm.
+
+Both factors are estimated once, at the scheduled fit, from that window's own
+in-sample residuals — never from held-out data and never re-estimated by
+``update`` — and both are one-step quantities reused at every horizon (see
+``_rv``'s "Horizon caveat").
+
+**Why the default moved (D-030), with the measurement.** docs/M2_NOTES.md
+recorded HAR's Gaussian correction over-inflating on the D-016
+overnight-plus-range target: against the toy fixture's *known* true
+close-to-close variance the forecast landed at 1.13x, because the overnight
+jump is a near-chi-squared single shock and the Gaussian-log-residual
+assumption is mis-specified for it. Measured again on the same fixture at the
+switch (200 origins, window 500, refit every origin): forecast/true
+**1.1320 -> 1.1102** and QLIKE-against-the-truth **0.0263 -> 0.0242**; QLIKE
+against the scored proxy 0.1823 -> 0.1806 and the 5% VaR hit rate unchanged
+at 0.035. So smearing removes about a sixth of the overshoot on this fixture
+— an improvement, not a cure: the residual over-inflation is HAR's own
+one-step, in-sample factor, and the toy's overnight share is not a real
+index's. The ``gaussian`` arm reproduces the pre-0.5.0 numbers to every
+printed digit, which is what makes the two comparable at all. The arm is in
+``spec()`` and in ``name``, so they can never collide onto one config hash.
 
 Multi-step forecasting: HAR is a direct 1-step model. For h > 1 this
-forecasts recursively — each step's point forecast is fed back into the RV
-buffer as if realized, and the design vector is rebuilt for the next step
-(the standard iterated HAR multi-day forecast).
+forecasts recursively — each step's retransformed point forecast is fed back
+into the RV buffer as if realized, and the design vector is rebuilt for the
+next step (the standard iterated HAR multi-day forecast).
 
 predict() returns a Distribution over the next-period RETURN (package
 convention: FittedModel.predict -> Distribution over the return, variance
@@ -47,6 +78,7 @@ it cannot recover a conditional mean and assumes none.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -55,6 +87,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from volbench.dist import Distribution, Normal
+from volbench.models._rv import (
+    Retransform,
+    gaussian_factor,
+    smearing_factor,
+    validated_rv,
+    variance_from_log,
+)
 
 __all__ = ["HAR", "FittedHAR"]
 
@@ -64,17 +103,6 @@ _M_WINDOW = 22
 _N_PARAMS = 4
 _MIN_ROWS = 5
 _MIN_TRAIN = _M_WINDOW + _MIN_ROWS
-
-
-def _validated_rv(train: NDArray[np.float64], minimum: int) -> NDArray[np.float64]:
-    rv = np.asarray(train, dtype=np.float64)
-    if rv.ndim != 1 or rv.size < minimum:
-        raise ValueError(
-            f"train must be a 1-D realized-variance series with at least {minimum} observations"
-        )
-    if not np.isfinite(rv).all() or (rv <= 0.0).any():
-        raise ValueError("realized-variance series must be finite and strictly positive")
-    return rv
 
 
 def _har_features(rv: NDArray[np.float64], t: int) -> tuple[float, float, float]:
@@ -101,27 +129,36 @@ class FittedHAR:
     """``eq=False``: numpy array fields make the dataclass default ``__eq__``
     raise (same trap documented on ``Origin`` in splitter.py); falls back to
     identity-based comparison instead of crashing.
+
+    Both retransformation factors are carried, so which arm is in force is a
+    property of ``config`` alone and the two are directly comparable on one
+    fit. Neither moves under ``update``.
     """
 
+    config: HAR
     beta: NDArray[np.float64]
+    #: Duan's smearing factor ``mean(exp(e_i))`` over the fit's residuals.
+    smear: float
+    #: In-sample residual variance in log space, for the ``gaussian`` arm.
     resid_var: float
     buffer: NDArray[np.float64]
 
     @property
     def name(self) -> str:
-        return "har_rv"
+        return self.config.name
 
     def spec(self) -> dict[str, Any]:
-        return {
-            "model": self.name,
-            "d_window": _D_WINDOW,
-            "w_window": _W_WINDOW,
-            "m_window": _M_WINDOW,
-        }
+        return self.config.spec()
+
+    def _factor(self) -> float:
+        if self.config.retransform == "smearing":
+            return self.smear
+        return gaussian_factor(self.resid_var)
 
     def predict(self, h: int) -> Distribution:
         if h < 1:
             raise ValueError("h must be >= 1")
+        factor = self._factor()
         buf = self.buffer.copy()
         rv_hat = 0.0
         for _ in range(h):
@@ -132,45 +169,63 @@ class FittedHAR:
                 + self.beta[2] * math.log(w)
                 + self.beta[3] * math.log(m)
             )
-            rv_hat = math.exp(y_hat + 0.5 * self.resid_var)
+            rv_hat = variance_from_log(y_hat, factor)
             buf = np.append(buf[1:], rv_hat)
         return Normal(mu=0.0, sigma=math.sqrt(rv_hat))
 
     def update(self, train: NDArray[np.float64]) -> FittedHAR:
         """Refresh the trailing RV lags under the fitted coefficients.
 
-        ``beta`` and ``resid_var`` stay exactly as estimated at the last
-        scheduled refit; only the buffer of the last 22 realized variances —
-        the regressors of the next forecast — moves to the end of ``train``.
-        Same validation as ``fit``: a non-positive or non-finite RV raises,
-        which the evaluator records as an ``update_error`` row.
+        ``beta`` and both retransformation factors stay exactly as estimated
+        at the last scheduled refit; only the buffer of the last 22 realized
+        variances — the regressors of the next forecast — moves to the end of
+        ``train``. Same validation as ``fit``: a non-positive or non-finite RV
+        raises, which the evaluator records as an ``update_error`` row.
         """
-        rv = _validated_rv(train, minimum=_M_WINDOW)
-        return FittedHAR(beta=self.beta, resid_var=self.resid_var, buffer=rv[-_M_WINDOW:].copy())
+        rv = validated_rv(train, minimum=_M_WINDOW)
+        return dataclasses.replace(self, buffer=rv[-_M_WINDOW:].copy())
 
 
 @dataclass(frozen=True)
 class HAR:
-    """HAR-RV (Corsi 2009): OLS in logs on daily/weekly/monthly RV components."""
+    """HAR-RV (Corsi 2009): OLS in logs on daily/weekly/monthly RV components.
+
+    ``retransform`` picks the log-to-variance correction (module docstring,
+    ``volbench.models._rv``, D-025/D-030): ``"smearing"`` is the default and
+    ``"gaussian"`` — HAR's pre-0.5.0 behaviour — the like-for-like arm.
+    """
+
+    retransform: Retransform = "smearing"
+
+    def __post_init__(self) -> None:
+        if self.retransform not in ("smearing", "gaussian"):
+            raise ValueError("retransform must be 'smearing' or 'gaussian'")
 
     @property
     def name(self) -> str:
-        return "har_rv"
+        return f"har_rv-{self.retransform}"
 
     def spec(self) -> dict[str, Any]:
         return {
-            "model": self.name,
+            "model": "har_rv",
             "d_window": _D_WINDOW,
             "w_window": _W_WINDOW,
             "m_window": _M_WINDOW,
+            "retransform": self.retransform,
         }
 
     def fit(self, train: NDArray[np.float64], **ctx: Any) -> FittedHAR:
-        rv = _validated_rv(train, minimum=_MIN_TRAIN)
+        rv = validated_rv(train, minimum=_MIN_TRAIN)
         x, y = _design_matrix(rv)
         beta = np.linalg.lstsq(x, y, rcond=None)[0].astype(np.float64)
         resid = y - x @ beta
         dof = max(x.shape[0] - _N_PARAMS, 1)
         resid_var = float(np.sum(resid * resid) / dof)
         buffer = rv[-_M_WINDOW:].copy()
-        return FittedHAR(beta=beta, resid_var=resid_var, buffer=buffer)
+        return FittedHAR(
+            config=self,
+            beta=beta,
+            smear=smearing_factor(resid),
+            resid_var=resid_var,
+            buffer=buffer,
+        )
