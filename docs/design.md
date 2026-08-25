@@ -395,10 +395,11 @@
 ### Invalid targets — `volbench.compaction`
 
 Added on `feat/p2-protocol` (D-018). An **invalid target day** is a day whose
-primary variance target is NaN or `<= 0`. The panel has 125 of them: 108 from
-bars whose close printed outside their own session range (TWSE 80, CAC 28), 14
-where a monotone bar met a stale open so that Rogers-Satchell and the overnight
-term are *both* exactly zero (HSI 12, NKX 2), and 3 singletons. Every log-RV
+primary variance target is NaN or `<= 0`. The panel has 125 of them: 109 from
+bars whose close printed outside their own session range (TWSE 80, CAC 28,
+HSI 1), 14 where a monotone bar met a stale open so that Rogers-Satchell and
+the overnight term are *both* exactly zero (HSI 12, NKX 2), and 2 first-in-
+window days with no previous close (SPY and DIA). Every log-RV
 model takes `log(RV)`, so before this a single such day failed every training
 window containing it — measurably, at window 500 and `refit_every=21`, 36% of
 HSI's origins and 52% of TWSE's.

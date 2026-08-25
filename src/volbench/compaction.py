@@ -1,15 +1,19 @@
 """Invalid-target policy (D-018): what an unusable variance day does to a fit window.
 
 An **invalid target day** is a day whose primary variance target is NaN or
-non-positive. Two mechanisms produce them in the real panel
-(docs/PANEL_REPORT.md §3, §4), and neither is a modelling choice:
+non-positive. The real panel has 125, from three mechanisms
+(docs/PANEL_REPORT.md §3, §4), none of them a modelling choice:
 
-- a bar whose close printed outside its own session high/low, whose
-  range-based targets are therefore NaN (TWSE 80 days, CAC 28, HSI 1);
-- a *monotone* bar (open at the high, close at the low, or the reverse) on a
-  day whose open equals the previous close, where Rogers-Satchell and the
-  overnight term are **both exactly zero**, so the D-016 target is exactly 0
-  (HSI 12 days, NKX 2).
+- **109** — a bar whose close printed outside its own session high/low, so
+  its range-based targets are NaN (TWSE 80, CAC 28, HSI 1);
+- **14** — a *monotone* bar (open at the high, close at the low, or the
+  reverse) on a day whose open equals the previous close, where
+  Rogers-Satchell and the overnight term are **both exactly zero**, so the
+  D-016 target is exactly 0 (HSI 12, NKX 2);
+- **2** — the first panel day of a series that starts inside the window
+  (SPY and DIA, both 2005-02-25), which has no previous close for its
+  overnight term. Structural rather than a defect, and the only one of the
+  three that sits at position 0.
 
 Such a day plays two roles, and D-018 treats them differently on purpose:
 
