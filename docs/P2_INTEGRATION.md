@@ -723,18 +723,18 @@ All on this box (RTX 4090, driver 535, torch 2.5.1+cu121 in the 3.11 venv;
 
 | Leg | Extras | ruff | mypy --strict | pytest |
 |---|---|---|---|---|
-| 3.11 | classical + tsfm | clean | clean, 41 files | **1042 passed, 29 skipped**, 7 m 24 s |
-| 3.12 (`CI=true`) | classical + torch-cpu | clean | clean | **1037 passed, 35 skipped**, 7 m 19 s |
-| 3.13 (`CI=true`) | classical + torch-cpu | clean | clean | **1037 passed, 35 skipped**, 7 m 04 s |
+| 3.11 | classical + tsfm | clean | clean, 41 files | **1013 passed, 29 skipped**, 7 m 24 s |
+| 3.12 (`CI=true`) | classical + torch-cpu | clean | clean | **1005 passed, 37 skipped**, 8 m 07 s |
+| 3.13 (`CI=true`) | classical + torch-cpu | clean | clean | **1005 passed, 37 skipped**, 8 m 06 s |
 | 3.11 opt-in (`VOLBENCH_RUN_TSFM=1 VOLBENCH_RUN_GPU=1 -m "tsfm or gpu or timegpt"`) | classical + tsfm | — | — | **29 passed, 1 skipped** (TimeGPT: no `NIXTLA_API_KEY`, by design) |
 
-The suite grew by 108 tests, 43 of them the new `tests/test_compaction.py`.
-The 3.12/3.13 legs ran five tests fewer because they were collected before the
-last commits; CI re-ran the whole matrix on the final tree, which is the
-authoritative matrix result (§12.3). The larger skip count on 3.12/3.13 is the
-`tsfm`-marked set, which `CI=true` never honours.
+All three legs collect the same 1042 tests, on the branch tip; the suite grew
+by 82, 43 of them the new `tests/test_compaction.py`. The eight extra skips on
+3.12/3.13 are the two real-archive tests below plus the six that
+`importorskip` the foundation-model backends the `tsfm` extra provides and CI
+never installs.
 
-Two of the 3.11 tests do not run anywhere else, by design:
+Two tests do not run in CI at all, by design:
 `test_the_real_panel_series_keep_every_origin` re-checks D-018 on the **real**
 HSI and TWSE archives (1.4 s each) and skips wherever they are not unpacked —
 and always under `CI`, since they are hand-downloaded and never committed. The
@@ -802,5 +802,20 @@ a real invariant gets eroded.
 
 ### 12.3 CI
 
-Pushing `feat/p2-protocol` triggers the matrix under the widened trigger
-(`feat/**`). Run recorded at merge time.
+Every push to `feat/p2-protocol` triggered the 3.11/3.12/3.13 matrix under the
+widened trigger (`feat/**`, D-021). All six runs green, first try — no repeat
+of the runner lottery §9.3 records, because the kernel-family pin (D-026) is
+in place:
+
+| commit | run | result |
+|---|---|---|
+| `372070d` docs: renumbering, D-018/019/020 | 32813070672 | **success** |
+| `187f880` test: pickle round trip | 32813202828 | **success** |
+| `21edf5a` fix: read-only copy | 32814295339 | **success** |
+| `1f5ef2b` test: real archives | 32814969884 | **success** |
+| `ba611e7` docs: panel size in prose | 32815140236 | **success** |
+| `11f4455` test: leftover expression | 32815484913 | **success** |
+
+`11f4455` is the branch tip and the tree that merges. Two runs this file
+cannot carry, for the usual reason: the commit that adds this table, and the
+merge commit on `main` — the latter is the run tagged `v0.4.0-protocol`.
