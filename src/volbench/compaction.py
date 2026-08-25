@@ -157,13 +157,21 @@ class FitSeries:
     valid_positions: NDArray[np.int64] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        array = np.asarray(self.values, dtype=np.float64)
+        # copy=True and then read-only, both load-bearing. ``np.asarray`` on a
+        # float64 pandas Series hands back a VIEW of that Series' buffer, so a
+        # caller who mutated the Series afterwards would leave ``values`` and
+        # the ``valid_positions`` derived from it describing different data —
+        # the same trap that made ``panel.repair_bars`` miscount its own bars.
+        # Deriving the positions once is what makes a window a binary search,
+        # so the array they were derived from must not be able to move.
+        array = np.array(self.values, dtype=np.float64, copy=True)
         if array.ndim != 1:
             raise ValueError(f"fit series must be 1-D, got shape {array.shape}")
         if self.policy not in ("compact", "none"):
             raise ValueError(
                 f"invalid-target policy must be 'compact' or 'none', got {self.policy!r}"
             )
+        array.setflags(write=False)
         object.__setattr__(self, "values", array)
         object.__setattr__(
             self,
@@ -264,8 +272,10 @@ class FitSeries:
     def window(self, train: NDArray[np.int64]) -> NDArray[np.float64]:
         """The values a model is fitted on at ``train``'s origin.
 
-        A fresh array in every case (numpy fancy indexing copies), so a model
-        that writes through its input cannot corrupt the series behind it.
+        A fresh, writable array in every case (numpy fancy indexing copies),
+        so a model that writes through its input cannot corrupt the series
+        behind it — and a backend that insists on a writable buffer still
+        gets one, even though ``values`` itself is read-only.
         """
         return self.values[self.window_positions(train)]
 

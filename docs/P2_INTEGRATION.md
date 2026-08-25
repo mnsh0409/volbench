@@ -723,15 +723,16 @@ All on this box (RTX 4090, driver 535, torch 2.5.1+cu121 in the 3.11 venv;
 
 | Leg | Extras | ruff | mypy --strict | pytest |
 |---|---|---|---|---|
-| 3.11 | classical + tsfm | clean | clean, 41 files | **1038 passed, 29 skipped**, 7 m 29 s |
+| 3.11 | classical + tsfm | clean | clean, 41 files | **1040 passed, 29 skipped**, 7 m 21 s |
 | 3.12 (`CI=true`) | classical + torch-cpu | clean | clean | **1037 passed, 35 skipped**, 7 m 19 s |
 | 3.13 (`CI=true`) | classical + torch-cpu | clean | clean | **1037 passed, 35 skipped**, 7 m 04 s |
 | 3.11 opt-in (`VOLBENCH_RUN_TSFM=1 VOLBENCH_RUN_GPU=1 -m "tsfm or gpu or timegpt"`) | classical + tsfm | — | — | **29 passed, 1 skipped** (TimeGPT: no `NIXTLA_API_KEY`, by design) |
 
-The 3.12/3.13 legs run one test fewer than 3.11: the suite gained
-`tests/test_compaction.py` (39 tests) and those two legs were collected one
-commit earlier; the difference is a single added test, and CI re-ran the whole
-matrix on the merge tree (§12.3). The larger skip count on 3.12/3.13 is the
+The suite grew by 106 tests, 41 of them the new `tests/test_compaction.py`.
+The 3.12/3.13 legs ran three tests fewer because they were collected before
+the last two commits (a pickle round-trip and an immutability regression);
+CI re-ran the whole matrix on the final tree, which is the authoritative
+matrix result (§12.3). The larger skip count on 3.12/3.13 is the
 `tsfm`-marked set, which `CI=true` never honours.
 
 `make reproduce` at 0.4.0: green, and the eight fragments **byte-identical**

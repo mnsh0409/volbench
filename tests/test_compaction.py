@@ -307,6 +307,28 @@ class TestWindowIsTheLastNValidObservations:
         assert FitSeries.of(np.ones(5)).policy == "compact"
         assert FitSeries.raw(np.ones(5)).policy == "none"
 
+    def test_the_series_cannot_move_under_the_positions_derived_from_it(self) -> None:
+        """``valid_positions`` is derived once, so ``values`` must be frozen.
+
+        ``np.asarray`` on a float64 pandas Series returns a *view* of that
+        Series' buffer — the trap that made ``panel.repair_bars`` describe
+        repaired bars rather than the ones the file contained. Here it would
+        be worse: the cached positions would say a day is valid that no longer
+        is, and a model would be handed it.
+        """
+        source = pd.Series([1.0, 2.0, 3.0, 4.0])
+        fit = FitSeries.compact(source)
+        assert fit.n_invalid == 0
+        source.iloc[1] = 0.0  # the caller mutates their own series afterwards
+        assert fit.n_invalid == 0, "the wrapper must hold its own copy"
+        assert float(fit.values[1]) == 2.0
+        with pytest.raises(ValueError):
+            fit.values[0] = -1.0  # ... and nothing can write through it either
+        # A window is still writable, because model backends may want that.
+        window = fit.window(np.arange(0, 3, dtype=np.int64))
+        window[0] = 99.0
+        assert float(fit.values[0]) == 1.0
+
     def test_it_survives_a_process_boundary(self) -> None:
         """``_BlockTask`` holds one of these and the Phase-3 executors pickle
         it across processes and Slurm array tasks (D-011). A frozen dataclass
