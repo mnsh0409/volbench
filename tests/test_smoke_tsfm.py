@@ -50,11 +50,14 @@ def _tiny_patchtst() -> ModelEntry:
 
 class TestModelSet:
     def test_default_set_is_constructible_without_weights(self) -> None:
+        # Construction only: a real-backend adapter's `spec()` reads the
+        # backend's version and the cached checkpoint's revision, so it needs
+        # the `tsfm` extra, which CI never installs.
         labels = [e.label for e in models(device="cpu")]
         assert labels == ["chronos", "timesfm", "moirai", "patchtst"]
         for entry in models(device="cpu"):
             assert entry.fits_on_variance
-            assert isinstance(entry.factory().spec(), dict)
+            assert entry.factory().name
 
     def test_timegpt_is_opt_in(self) -> None:
         assert "timegpt" not in [e.label for e in models()]
