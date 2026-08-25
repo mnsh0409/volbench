@@ -83,13 +83,33 @@ Fixed seed for weight init, batch order and dropout;
 duration of the fit (restored afterwards); ``CUBLAS_WORKSPACE_CONFIG`` set at
 import if unset; single device. Same window + same seed => bit-identical
 forecast twice, on one device — pinned by test on CPU and on the GPU.
-``device`` is where the computation runs, not what is computed, and is not
-in ``spec()``. Across devices: with ``dropout=0`` CPU and CUDA fits agree to
-float rounding (measured ~1e-8 relative); with dropout on, each device draws
-its masks from its own RNG stream, so a CPU fit and a CUDA fit of the same
-seed are two training realisations (a few percent apart on a 300-point
-window). Results therefore reproduce *per device class*; the paper's runs
-are all on the one GPU, and the tests pin both facts.
+Across devices: with ``dropout=0`` CPU and CUDA fits agree to float rounding
+(measured ~1e-8 relative); with dropout on, each device draws its masks from
+its own RNG stream, so a CPU fit and a CUDA fit of the same seed are two
+training realisations (~1.6% apart on a 300-point window). Results therefore
+reproduce *per device class*.
+
+**The device class is hashed (D-031).** Up to v0.4.0 ``device`` was outside
+``spec()`` altogether, on the reading that it is *where* the computation runs
+rather than *what* is computed. The line above is why that was wrong for this
+model: with dropout on, the device class picks the RNG stream and therefore
+the training realization, so two numerically different fragments could share
+one ``config_hash`` and the store could serve either for the other. Since
+v0.5.0 ``spec()`` carries ``device_class`` — ``"cuda"`` or ``"cpu"``, the
+torch device *type*, not the ordinal — so a CPU fragment and a GPU fragment
+of the same configuration are two different cells and neither can be served
+for the other. The ordinal stays out: ``"cuda:0"`` and ``"cuda:1"`` are the
+same class and hash identically, which is what lets a multi-GPU grid place a
+cell on whichever card is free. Two *different GPU models* are not
+distinguished either; that is the same qualification D-026 puts on the numpy
+kernel family, and the paper's runs state their hardware.
+
+``device="auto"`` resolves against the machine (CUDA if available), so its
+``spec()`` — and hence the cell's identity — depends on where it is
+evaluated. That is the honest answer for a setting whose meaning is "whatever
+this box has": pin ``device="cuda"`` or ``"cpu"`` to fix the identity in
+advance. Resolving ``"auto"`` needs torch importable; an explicit device
+never does, so describing a pinned configuration still costs no backend.
 
 Dependency: torch (extra ``torch-cpu`` in CI, ``tsfm`` on the GPU box).
 ``volbench.models`` imports this module without torch; ``fit`` needs it.
@@ -109,7 +129,7 @@ from numpy.typing import NDArray
 from volbench.dist import Distribution, Normal
 from volbench.models._rv import validated_rv, variance_from_log
 
-__all__ = ["FittedPatchTST", "PatchTST"]
+__all__ = ["FittedPatchTST", "PatchTST", "resolve_device_class"]
 
 # cuBLAS reads this when it creates its handles, which happens on the first
 # CUDA op in the process; deterministic mode refuses cuBLAS calls otherwise.
@@ -122,6 +142,28 @@ def _torch_version() -> str:
         return version("torch")
     except PackageNotFoundError:
         return "not-installed"
+
+
+def resolve_device_class(device: str) -> str:
+    """The torch device *type* ``device`` names on this machine (D-031).
+
+    ``"cuda:1"`` -> ``"cuda"``: the ordinal picks a card, not a training
+    realization, so it stays out of the config hash. ``"auto"`` is resolved
+    against the machine, which is the only honest reading of it — and the one
+    case that needs torch importable, because "whatever this box has" is not
+    answerable without asking.
+    """
+    if device == "auto":
+        try:
+            import torch
+        except ImportError as exc:  # pragma: no cover - exercised only without torch
+            raise ImportError(
+                "device='auto' cannot be resolved without torch installed, and the device "
+                "class is part of this model's config hash (D-031). Pin device='cpu' or "
+                "device='cuda' to describe the configuration without a backend."
+            ) from exc
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    return device.split(":", 1)[0]
 
 
 @dataclass(frozen=True, eq=False)
@@ -185,6 +227,8 @@ class PatchTST:
         Weight init, batch order and dropout.
     device:
         ``"auto"`` (CUDA if available), ``"cuda"``/``"cuda:0"``, ``"cpu"``.
+        The string itself is not hashed; the *class* it resolves to is
+        (``device_class``, D-031 — see the module docstring).
     """
 
     lookback: int = 64
@@ -226,6 +270,11 @@ class PatchTST:
         return "patchtst"
 
     @property
+    def device_class(self) -> str:
+        """``"cuda"`` or ``"cpu"`` — the hashed half of ``device`` (D-031)."""
+        return resolve_device_class(self.device)
+
+    @property
     def min_train(self) -> int:
         """Smallest window that yields two training windows plus one validation window."""
         return self.lookback + self.max_horizon + 2
@@ -256,6 +305,10 @@ class PatchTST:
             "seed": self.seed,
             "retransform": "smearing",
             "torch": _torch_version(),
+            # D-031: the device class picks the dropout RNG stream and hence
+            # the training realization, so it identifies the cell. The ordinal
+            # does not and is deliberately absent.
+            "device_class": self.device_class,
         }
 
     def fit(self, train: NDArray[np.float64], **ctx: Any) -> FittedPatchTST:

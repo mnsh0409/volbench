@@ -22,6 +22,8 @@ from volbench.dist import Normal
 from volbench.evaluate import SupportsUpdate, run_backtest
 from volbench.models import FittedPatchTST, PatchTST
 from volbench.models.base import FittedModel, ForecastModel
+from volbench.models.patchtst import resolve_device_class
+from volbench.results import config_hash
 from volbench.splitter import RollingOriginSplitter
 
 SMOKE = dict(
@@ -46,11 +48,13 @@ def realized_variance(n: int, seed: int = 0) -> np.ndarray:
 
 class TestSpec:
     def test_name_and_hashed_hyperparameters(self) -> None:
-        model = PatchTST()
+        # An explicit device: `device="auto"` resolves against the machine and
+        # so needs torch (TestDeviceClass covers that half).
+        model = PatchTST(device="cpu")
         assert model.name == "patchtst"
         spec = model.spec()
         json.dumps(spec, sort_keys=True)
-        assert spec == PatchTST().spec()
+        assert spec == PatchTST(device="cpu").spec()
         for key in (
             "lookback",
             "patch_len",
@@ -71,14 +75,14 @@ class TestSpec:
             "retransform",
             "early_stopping",
             "torch",
+            "device_class",
         ):
             assert key in spec, key
         assert spec["retransform"] == "smearing"
         assert "device" not in spec
-        assert PatchTST(device="cpu").spec() == PatchTST(device="cuda").spec()
-        assert PatchTST(seed=1).spec() != spec
-        assert PatchTST(max_epochs=5).spec() != spec
-        assert PatchTST(patience=3).spec() != spec
+        assert PatchTST(seed=1, device="cpu").spec() != spec
+        assert PatchTST(max_epochs=5, device="cpu").spec() != spec
+        assert PatchTST(patience=3, device="cpu").spec() != spec
 
     def test_constructor_validation(self) -> None:
         with pytest.raises(ValueError, match="patch_len"):
@@ -109,7 +113,56 @@ class TestSpec:
 
     def test_no_update_by_design(self) -> None:
         assert not hasattr(FittedPatchTST, "update")
-        assert isinstance(PatchTST(), ForecastModel)
+        assert isinstance(PatchTST(device="cpu"), ForecastModel)
+
+
+class TestDeviceClass:
+    """D-031: the device class is hashed, the ordinal is not.
+
+    Up to v0.4.0 `device` was outside `spec()` entirely, so a CPU fragment and
+    a GPU fragment of one configuration shared a `config_hash` while holding
+    different numbers (dropout draws from the device's own RNG stream —
+    `TestGpu::test_with_dropout_cpu_and_gpu_are_different_realisations`
+    measures it). The store is content-addressed: one hash must mean one
+    artefact, so the class that decides the realization has to be in the hash.
+    """
+
+    def test_the_two_device_classes_do_not_share_a_config_hash(self) -> None:
+        cpu = PatchTST(device="cpu")
+        cuda = PatchTST(device="cuda")
+        assert cpu.spec() != cuda.spec()
+        assert config_hash(cpu.spec()) != config_hash(cuda.spec())
+        assert (cpu.spec()["device_class"], cuda.spec()["device_class"]) == ("cpu", "cuda")
+
+    def test_the_ordinal_is_not_part_of_the_class(self) -> None:
+        """Which card runs a cell is placement, not identity — a multi-GPU
+        grid has to be free to put a cell on whichever device is idle."""
+        assert resolve_device_class("cuda:1") == "cuda"
+        assert PatchTST(device="cuda:0").spec() == PatchTST(device="cuda:1").spec()
+        assert PatchTST(device="cuda:3").spec() == PatchTST(device="cuda").spec()
+
+    def test_an_explicit_device_is_resolved_without_asking_torch(self) -> None:
+        """`spec()` on a pinned configuration must stay a torch-free call, or
+        describing a grid would need the backend installed (D-022).
+        `tests/test_optional_backends.py` runs the same call with torch
+        actually blocked; this pins the resolution itself."""
+        assert resolve_device_class("cpu") == "cpu"
+        assert resolve_device_class("cuda") == "cuda"
+
+    def test_auto_resolves_against_the_machine(self) -> None:
+        torch = pytest.importorskip("torch")
+        expected = "cuda" if torch.cuda.is_available() else "cpu"
+        assert resolve_device_class("auto") == expected
+        assert PatchTST().spec()["device_class"] == expected
+        assert PatchTST().spec() == PatchTST(device=expected).spec()
+
+    def test_the_class_the_fit_actually_ran_on_is_the_one_that_was_hashed(self) -> None:
+        """The whole point: what `spec()` claimed and what `fit` used cannot
+        drift apart, or the hash would describe a different computation."""
+        pytest.importorskip("torch")
+        model = PatchTST(**SMOKE)
+        fitted = model.fit(realized_variance(50))
+        assert fitted.spec()["device_class"] == "cpu"
 
 
 class TestWindows:
