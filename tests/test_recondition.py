@@ -59,20 +59,25 @@ N_ORIGINS = 200
 #: item 1), at the 0.2.0 version bump (item 3 — package_version is in every
 #: hash), at the 0.3.0 Phase-2 core integration (D-021: all eight moved with
 #: the version; autoets / autoarima / lgbm are new — the classical log-RV
-#: models joined the toy benchmark, D-023), and at 0.4.0, where two things
-#: moved them at once: the version again, and D-018's invalid-target policy,
-#: which the four variance-fed cells now carry in ``protocol``. The *numbers*
-#: did not move at 0.4.0 — the fixture has no invalid day for compaction to
-#: drop, and ``tests/test_compaction.py`` pins that equivalence directly.
+#: models joined the toy benchmark, D-023), at 0.4.0, where two things moved
+#: them at once: the version again, and D-018's invalid-target policy, which
+#: the four variance-fed cells now carry in ``protocol`` (the *numbers* did
+#: not move there — the fixture has no invalid day for compaction to drop,
+#: and ``tests/test_compaction.py`` pins that equivalence directly), and at
+#: 0.5.0 (D-030), where the version moved all eight again and HAR's move onto
+#: the shared smearing retransformation moved **HAR's numbers as well** — its
+#: model name is now ``har_rv-smearing`` and its QLIKE 0.1823 -> 0.1806. The
+#: other seven cells' numbers are byte-identical to the 0.4.0 run; only their
+#: hashes moved, with the version.
 PINNED_CONFIG_HASHES = {
-    "autoarima": "b9ec1db025462eb6202e0fb1488cdd9c52245cafcc07511ada7c8c510da75a3e",
-    "autoets": "48eb039009a4cb621916b054392f2a9d067f68068ae808c73bec0318035348aa",
-    "ewma": "8c4fe2600b3be649d316b1d5bf3c6b87f8c89b59acc901fe76b90df83514cb0f",
-    "garch11": "508a70e07157f34dba2fbcf517952390ceacd17a33d206a49df434c0f78b37a0",
-    "garch11_t": "50ae49775f78a3d6e59b4e5f0f46a39de55244680bd698aeb9e6e733c1dfcfe9",
-    "har": "d793f8ce3f272cc564f942ae735f1b01d35db5c8c3665cbfa473eb6d080c0427",
-    "lgbm": "4edaa744169d7774f228de84113f3ac393848c024e4c805684110ec20c9fd838",
-    "naive": "109e1f8ffeecb24d42ca39e3487056f3e5d3ea1bd7b16347e1b422cd0062efa1",
+    "autoarima": "61a64971e7367ed584c56f15fce5ae1771e62d380fb88e85d0704f3565322e26",
+    "autoets": "8b9eb9fc14bd5992bd7a582faba1c9e532cb833ca99e36c89733a21d5c4f8280",
+    "ewma": "5cd9e3e15f04846dcbdfd7aa44b339334f96488895bb4972b85e507a823f73c7",
+    "garch11": "c708c06e7041d25ff8aad8d97984589cd8e4e7a47b6acfb4e9df12dbd44b991b",
+    "garch11_t": "7a4f43585f282c67f9d34e8c43b370e00645a1cceb7ad17747d21984944de64f",
+    "har": "bf3283ac1dad66a627bd3d6359266d5dfac046a501387061fd1df2ad6c80c947",
+    "lgbm": "5628598dd6970a8ffd8a130ae87a519eec26d20f1f407955ec2a1dd262957933",
+    "naive": "da5fb0f61d3f3e70692996fc79ce39a37089099b5acd5543a68ce4cb0373901a",
 }
 
 

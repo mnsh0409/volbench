@@ -7,10 +7,13 @@ What this root namespace exports, and what it deliberately does not:
   every model adapter and its fitted type, the pure variance proxies, the
   evaluation/results/execution entry points, the invalid-target policy
   (``FitSeries`` and friends) that says what an unusable variance day does to
-  a fit window, and — since Phase 2 — the
+  a fit window, the grid runner (``run_grid``, ``GridSpec``, ``ModelConfig``,
+  ``ProtocolArm``, ``AssetData``, ``RunManifest``) and the local
+  multiprocessing backend (``ProcessExecutor``), and — since Phase 2 — the
   inference (``diebold_mariano``, ``model_confidence_set``,
-  ``compare_models``) and VaR-backtest (``kupiec_pof``, ``christoffersen``,
-  ``fz0_loss``, ``var_backtest``) entry points that consume the evaluation's
+  ``compare_models``), VaR-backtest (``kupiec_pof``, ``christoffersen``,
+  ``fz0_loss``, ``var_backtest``) and economic-value
+  (``volatility_target_backtest``) entry points that consume the evaluation's
   rows. These are the names a user or a Phase 2 stream composes a benchmark
   out of. Adapters whose backend is optional import it lazily, so none of
   these imports needs an extra installed.
@@ -58,6 +61,7 @@ from volbench.data import (
     squared_return,
 )
 from volbench.dist import Distribution, Empirical, Normal, QuantileGrid, StudentT
+from volbench.econ import VolTargetBacktest, periods_per_year_for, volatility_target_backtest
 from volbench.evaluate import (
     DEFAULT_LEVELS,
     ModelFactory,
@@ -66,7 +70,7 @@ from volbench.evaluate import (
     forecast_moments,
     run_backtest,
 )
-from volbench.execute import Executor, SerialExecutor
+from volbench.execute import Executor, ProcessExecutor, SerialExecutor
 from volbench.inference import (
     DMMatrix,
     DMResult,
@@ -116,6 +120,18 @@ from volbench.results import (
     normalize_frame,
     package_version,
 )
+from volbench.runner import (
+    AssetData,
+    CellOutcome,
+    DataSource,
+    GridSpec,
+    MappingDataSource,
+    ModelConfig,
+    ProtocolArm,
+    RunManifest,
+    read_grid_results,
+    run_grid,
+)
 from volbench.splitter import Origin, RollingOriginSplitter
 
 __version__ = package_version()
@@ -128,12 +144,15 @@ __all__ = [
     "HAR",
     "KEY_COLUMNS",
     "REQUIRED_COLUMNS",
+    "AssetData",
     "AutoARIMARV",
     "AutoETSRV",
+    "CellOutcome",
     "ChristoffersenResult",
     "Chronos",
     "DMMatrix",
     "DMResult",
+    "DataSource",
     "Distribution",
     "Empirical",
     "Executor",
@@ -148,23 +167,29 @@ __all__ = [
     "FittedStatsForecastRV",
     "FittedTSFM",
     "ForecastModel",
+    "GridSpec",
     "InsufficientHistoryError",
     "InvalidTargetPolicy",
     "KupiecResult",
     "LightGBMRV",
     "LossMatrix",
     "MCSResult",
+    "MappingDataSource",
     "ModelComparison",
+    "ModelConfig",
     "ModelFactory",
     "Moirai",
     "NaiveVol",
     "Normal",
     "Origin",
     "PatchTST",
+    "ProcessExecutor",
+    "ProtocolArm",
     "QuantileGrid",
     "Recondition",
     "ResultsStore",
     "RollingOriginSplitter",
+    "RunManifest",
     "SerialExecutor",
     "StudentT",
     "SupportsUpdate",
@@ -172,6 +197,7 @@ __all__ = [
     "TimeSeriesFrame",
     "TimesFM",
     "VaRBacktest",
+    "VolTargetBacktest",
     "__version__",
     "array_digest",
     "build_config",
@@ -197,12 +223,16 @@ __all__ = [
     "overnight_variance",
     "package_version",
     "parkinson",
+    "periods_per_year_for",
     "pinball",
     "qlike",
+    "read_grid_results",
     "realized_variance_from_bars",
     "rogers_satchell",
     "run_backtest",
+    "run_grid",
     "squared_return",
     "valid_target_mask",
     "var_backtest",
+    "volatility_target_backtest",
 ]
