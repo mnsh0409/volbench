@@ -591,10 +591,12 @@ Pushing `m2/p2-integration` triggered CI under the widened trigger.
 Run 32794688768 (`462799e`): 3.11 green, 3.13 **failed** on the pinned
 identities, 3.12 (see below). Run 32795672046 (`fb7ba7b`, with the config
 dump): 3.12 **failed** the same way and the dump located the cause — §3.6.
-The fix (kernel-family pin in CI and `make reproduce`) is the commit after
-this one; its run and the run on the merge commit on `main` are the
-evidence, recorded in the git history of this section since a commit cannot
-carry its own CI result.
+Run 32795672046's other legs finished 3.11 **failed** / 3.13 passed — the
+mirror image of run 32794688768 (3.11 passed / 3.13 failed) on the same
+code, which is the runner lottery in one table. With the kernel-family pin
+(`6bf3832`), run 32796535733: **3.11, 3.12, 3.13 all green**. The merge
+commit on `main` gets its own run, which this file cannot carry; it is the
+run tagged `v0.3.0-p2core`.
 
 
 ## 10. Flagged for a human — not resolved here
