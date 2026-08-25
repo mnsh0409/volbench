@@ -64,6 +64,13 @@ Conventions, stated because a Sharpe ratio means nothing without them
   The default is **10 bps**, which is docs/research_design.md's "Sharpe net of
   10 bps per rebalance". The first day is charged against a flat book
   (``position_{-1} = 0``), because getting into the position costs money.
+- **Annualized return is geometric, the Sharpe is arithmetic.** The reported
+  return is the constant annual rate that would produce the equity curve's
+  final wealth; the Sharpe is the usual annualized mean-over-standard-deviation
+  of the *per-period* excess returns. Mixing the two is standard practice and
+  is stated here because the two answer different questions — "what did it
+  compound at" and "what was it paid per unit of risk" — and cannot be
+  reconciled by arithmetic.
 - **Risk-free rate** defaults to 0, so the reported Sharpe is a raw-return
   Sharpe. Stated rather than hidden: with ``leverage_cap > 1`` the strategy
   borrows, and no financing spread beyond the transaction costs is modelled.
