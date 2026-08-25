@@ -1,17 +1,21 @@
 # 04 · volbench API design
 
-> Status: **AS-BUILT at the protocol follow-up (v0.4.0-protocol)**. This
+> Status: **AS-BUILT at the runner build (v0.5.0-runner)**. This
 > file described the plan until the three Phase 1 streams landed; it now
 > describes what exists, with every place the build diverged from the plan
 > called out inline under **Diverged:**. Updated at M1, at M2
 > (`m2/evaluator-hardening`, `m2/cleanup`), at the Phase-2 integration of
 > `feat/p2-models-classical`, `feat/p2-models-tsfm`, `feat/p2-inference` and
 > `feat/p2-data-panel` (docs/P2_INTEGRATION.md — all four streams flagged
-> this file's drift; it is reconciled there in one pass), and on
+> this file's drift; it is reconciled there in one pass), on
 > `feat/p2-protocol`, which took the three protocol decisions that
 > integration deferred (D-018 invalid targets, D-019 fit window, D-020 the
-> panel list) and closed the ES gap. The planning-folder copy is behind this
-> one and needs re-syncing from here, not the other way round.
+> panel list) and closed the ES gap, and on `feat/p2-runner`
+> (docs/P3_RUNNER.md), which built the grid runner, the local multiprocessing
+> executor and the economic-value metric, and closed two model-protocol open
+> questions (D-030 HAR's retransformation, D-031 PatchTST's device class).
+> The planning-folder copy is behind this one and needs re-syncing from here,
+> not the other way round.
 
 ## Components
 
@@ -226,12 +230,21 @@
   — nothing in the type system distinguishes a returns array from a variance
   array. See `docs/M1_REPORT.md` risk 2.
 
-  **Open (found at M2, docs/M2_NOTES.md):** HAR's lognormal retransformation
-  `E[RV]=exp(ŷ+½·resid_var)` is sensitive to the target's log-space noise. On
-  the toy fixture, feeding HAR the (correct, noisier) overnight-plus-range
-  target inflates its forecast ~13% above the true variance, where the
-  intraday Parkinson target happened to leave it well-calibrated. A bias-
-  corrected or component overnight+intraday HAR is the Phase-2 fix.
+  **Resolved on `feat/p2-runner` (D-030), was open since M2.** HAR's lognormal
+  retransformation `E[RV]=exp(ŷ+½·resid_var)` is sensitive to the target's
+  log-space noise: on the toy fixture the correct, noisier
+  overnight-plus-range target inflated HAR's forecast ~13% above the *known*
+  true variance, where the intraday Parkinson target happened to leave it
+  well-calibrated. HAR now retransforms through `models/_rv` like every other
+  log-RV model, Duan smearing by default (`retransform="smearing"` in `spec()`
+  and in `name`, so `har_rv-smearing`), with `retransform="gaussian"` kept as
+  the arm that reproduces the pre-0.5.0 numbers exactly. Measured at the
+  switch on the toy fixture: forecast/true **1.1320 → 1.1102**,
+  QLIKE-against-the-truth **0.0263 → 0.0242**, QLIKE against the scored proxy
+  0.1823 → 0.1806, the 5% hit rate unchanged. About a sixth of the overshoot,
+  so an improvement and not a cure — the residual is HAR's own one-step
+  in-sample factor, and a component overnight+intraday HAR remains the deeper
+  fix. Every HAR hash moved; so did the version (0.5.0).
 
   **Diverged:** `GARCH.fit` never raises on optimizer failure; it falls back to
   EWMA on the same window and records `fallback=True`. HAR, by contrast, *does*
@@ -258,8 +271,10 @@
     is the default because docs/M2_NOTES.md measured the Gaussian correction
     over-inflating on the noisy overnight-plus-range target. Since the
     Phase-2 integration `PatchTST` retransforms through the same module (it
-    had carried a local copy). HAR itself still uses its own Gaussian
-    `resid_var` correction — *open* (below).
+    had carried a local copy), and since `feat/p2-runner` (D-030) so does
+    `HAR` — the last hold-out, and the model the M2 measurement was taken on.
+    Every log-RV model in the package now shares one correction and one
+    default.
   - **`SupportsUpdate` is implemented, exactly.** statsforecast's `forward`
     re-filters at fixed parameters (`ets_f(y, model=fitted)` /
     `Arima(x, model=fitted)`; the ETS h-step variance is read from the
@@ -327,7 +342,11 @@
     dtype, and package versions, so the config hash moves with the weights.
     Chronos-Bolt/2, TimesFM 2.5 and Moirai-2 emit quantiles directly — no
     sampling — and the `tsfm`-marked tests pin bit-identity on the GPU.
-    `device` is not in `spec()`.
+    `device` is not in `spec()`: these adapters estimate nothing, so no RNG
+    stream is drawn from and D-031's argument for hashing the device class
+    does not apply to them (a forward pass differs across devices only by
+    float accumulation order, which is the same tolerance question D-026
+    already scopes).
   - TimeGPT is triple-gated (constructor `enabled=True`, `NIXTLA_API_KEY`,
     `@pytest.mark.timegpt`) and cannot pin remote weights; it stays out of
     the headline as the research design says.
@@ -345,10 +364,23 @@
   attention, `use_deterministic_algorithms`, seeded batches/dropout) and
   pinned bit-identical twice on CPU and GPU; across devices, dropout draws
   from each device's own RNG stream, so results reproduce **per device
-  class** (with `dropout=0` CPU and GPU agree to ~1e-8), and `device` is not
-  hashed — which means two fragments with one config hash, computed on a
-  CPU and on a GPU, can legitimately differ. The paper's PatchTST numbers
-  must therefore state the device class. **No `update`:** re-conditioning
+  class** (with `dropout=0` CPU and GPU agree to ~1e-8; with dropout on, a CPU
+  and a CUDA fit of one seed are two training realizations, ~1.6% apart on a
+  300-point window).
+
+  **The device class is hashed (D-031, resolved on `feat/p2-runner`).** Until
+  v0.4.0 `device` was outside `spec()` entirely, so two fragments with one
+  `config_hash` — one computed on a CPU, one on a GPU — could legitimately
+  hold different numbers, and the content-addressed store could serve either
+  for the other. `spec()` now carries `device_class` (`"cuda"` / `"cpu"`, the
+  torch device *type*), so those are two cells and neither can be served for
+  the other. The ordinal stays out: `"cuda:0"` and `"cuda:1"` hash the same,
+  which is what lets a multi-GPU grid place a cell on whichever card is free;
+  two different GPU *models* are not distinguished either, the same
+  qualification D-026 puts on the numpy kernel family. `device="auto"`
+  resolves against the machine and therefore needs torch importable — pin
+  `"cpu"` or `"cuda"` to fix a configuration's identity in advance; an
+  explicit device keeps `spec()` a torch-free call. **No `update`:** re-conditioning
   a trained net without re-estimation is not well defined, so it runs frozen
   between refits and `conditioned_through == fit_origin` on every row.
   Training windows are cut from the fit array only (last target = the
@@ -485,7 +517,7 @@ Settled after M1 report §4.3 (open at M1, implemented on
   — pinned in `tests/test_models_tsfm_common.py` by running the same cell at
   `refit_every=1` and `21` and comparing scores byte for byte.
 
-### Evaluation — `volbench.evaluate`, `volbench.results`, `volbench.execute`
+### Evaluation — `volbench.evaluate`, `volbench.results`, `volbench.execute`, `volbench.runner`, `volbench.econ`
 
 - **`run_backtest(model_factory, series, proxy, splitter, seed, *, asset,
   proxy_name, data_spec=None, fit_series=None, levels=DEFAULT_LEVELS,
@@ -592,21 +624,155 @@ Settled after M1 report §4.3 (open at M1, implemented on
   `array_digest`, `normalize_frame`, `package_version`, `KEY_COLUMNS`,
   `REQUIRED_COLUMNS`.
 
-- **`Executor` / `SerialExecutor`** (`execute.py`) — the execution seam. A
-  cell is one `(asset, model, splitter, seed)` unit; within a cell,
-  `run_backtest` further splits origins into *refit blocks* and maps those
-  through the same seam. Serial only at M1; process- and Slurm-backed
-  implementations are Phase 2 and belong here and nowhere else.
+- **`Executor` / `SerialExecutor` / `ProcessExecutor`** (`execute.py`) — the
+  execution seam. A cell is one `(asset, model, splitter, seed)` unit; within a
+  cell, `run_backtest` further splits origins into *refit blocks* and maps
+  those through the same seam. Serial only at M1; `ProcessExecutor`, the local
+  multiprocessing backend, landed on `feat/p2-runner` (D-028). A Slurm-array
+  backend belongs here too and nowhere else.
 
-  **Diverged:** the plan's **`Runner`** — grid orchestration across
-  (series × model × window), GPU batching — **does not exist**. `execute.py` is
-  the seam it will plug into, not the orchestrator.
+  **`ProcessExecutor`** — `concurrent.futures.ProcessPoolExecutor` over a
+  configurable worker count, **fork** start method by default, one pool per
+  `map` call (so the object holds no OS resources between calls and is safe in
+  a config). Three things it does beyond mapping:
+
+  - **Byte-identity is the gate, not a hope.**
+    `tests/test_runner.py::TestSerialParallelIdentity` runs one grid through
+    both backends into two stores and compares the *parquet bytes* fragment by
+    fragment. That is D-011's H4 claim ("same forecasts, three execution
+    paths, verified identity"); it has an inert-proof companion that perturbs
+    one input by one ulp and asserts the comparison notices.
+  - **The numpy kernel family travels with the work (D-026).** Fork means a
+    worker inherits the parent's already-initialized numpy — the dispatch
+    decision itself, not merely the environment that produced it. On top of
+    that the parent's `NPY_DISABLE_CPU_FEATURES` is propagated verbatim
+    (including "unset", because inventing a value the parent did not have
+    would make the pool disagree with a serial run in the same shell), and
+    every worker compares its own enabled dispatch targets against the
+    parent's (`kernel_signature()`) and refuses the task if they differ. A
+    mismatch is then a loud error naming both signatures rather than a
+    silently orphaned fragment.
+  - **Rule 1 ("no nesting") is enforced.** `map` raises inside a worker
+    process, because a pool-backed executor nested in a bounded pool deadlocks
+    — and a deadlock is indistinguishable from a slow grid until someone kills
+    it. The runner hands every cell a `SerialExecutor` for its refit blocks.
+
+  `ProcessExecutor` knows nothing about GPUs. Serializing GPU-bound cells is
+  the runner's job, from explicit configuration (below).
+
+- **`volbench.runner`** (added on `feat/p2-runner`, D-027) — grid
+  orchestration. `run_grid(grid, source, store, *, cpu_executor, gpu_executor,
+  overwrite, manifest_path, on_cell) -> RunManifest` runs the full cross of
+  `asset × model-config × horizon × protocol-arm`. It is deliberately thin:
+  every number is still decided by `RollingOriginSplitter`, `config_hash`,
+  `ResultsStore` and `run_backtest`, and what the runner adds is four
+  properties a bare loop would not have.
+
+  - **`GridSpec`** (`assets`, `models`, `horizons`, `arms`, `seed`, `levels`)
+    expands to `Cell`s in a **total order** over `(asset, model label, horizon,
+    arm label)` — sorted, never set/dict iteration order — so two descriptions
+    of one grid produce one manifest ordering. `ModelConfig` carries the
+    factory, `fits_on_variance` and `lane`; `ProtocolArm` carries `window`,
+    `refit_every`, `step`, `recondition` and `invalid_target_policy`, i.e.
+    exactly the settings that already reach the config hash, so two arms can
+    never share a cached cell. The `horizon` dimension is the *splitter's*
+    horizon: a cell at `H` scores every `h ≤ H` and has its own origin set, so
+    horizons 1 and 5 are different experiments, not a subset relation.
+  - **Resumable by construction.** A cell whose `config_hash` is in the store
+    is skipped (`status="cached"`) by `run_backtest`'s own short-circuit —
+    before any fit. There is no run state on disk beyond the results
+    themselves, so "resume after an interruption" and "extend the grid" are
+    the same operation, and a re-run leaves existing fragments byte-identical
+    *and unrewritten* (the tests check mtimes as well as bytes).
+  - **Per-cell fault isolation**, the evaluator's per-origin philosophy one
+    level up: a cell that raises is recorded `status="failed"` with the
+    exception type and message, logged at WARNING, and the grid continues.
+    Only `Exception` is caught. A failure *inside* a cell's origins never
+    reaches the runner at all — `run_backtest` has already made it a NaN row —
+    so `n_missing` is carried on every outcome to keep those visible from the
+    manifest. A failure of the *data source* is not isolated and propagates:
+    a wrong path is a wasted grid, not a result.
+  - **Lanes.** `ModelConfig.lane` is `"cpu"` (fan out) or `"gpu"` (serialized,
+    its own executor, `SerialExecutor` by default). It is **declared, never
+    inferred from a model's name** — a name-based guess misroutes the first
+    adapter that breaks the pattern, and the failure mode is a CUDA OOM
+    halfway through a grid. The lanes run **CPU first, then GPU**
+    (`LANE_ORDER`), because the CPU lane forks and forking a process that has
+    already initialized a CUDA context is undefined behaviour; running them
+    concurrently needs `gpu_executor=ProcessExecutor(workers=1)` and is not
+    the default.
+
+  **`AssetData`** (returns, proxy, `proxy_name`, optional variance series,
+  `data_spec`) is what a `DataSource.load(asset)` returns, and it is loaded
+  **once per asset in the parent process** before any cell runs — one read,
+  one content digest, every cell of that asset provably scored against the
+  same bytes. `MappingDataSource` wraps an in-memory dict; a plain mapping is
+  accepted directly.
+
+  **`RunManifest`** is a tuple of `CellOutcome`s in grid order — index, asset,
+  model, horizon, arm, lane, status, `config_hash`, `n_rows`, `n_missing`,
+  `wall_clock_s`, `error` — with `to_frame()`, `as_json()` and `write(path)`
+  (temp file + `os.replace`, the store's discipline). It is a *record*, never
+  an input: resuming reads the store, so a stale manifest cannot corrupt a
+  grid. Two manifests of one grid differ only in their timings; there is
+  deliberately no reader. `read_grid_results(store, manifest)` returns this
+  grid's rows only, so a store shared with an earlier study does not silently
+  widen the table an analysis runs on.
+
+  **Diverged:** the plan's **`Runner`** was a class; as built it is a function
+  over dataclasses, matching `run_backtest`. The plan's **GPU batching**
+  (several assets per forward pass) is still not built — the runner serializes
+  the GPU lane rather than batching within it, and batching remains the open
+  question the TSFM stream flagged, because it would reintroduce cross-series
+  padding and alignment and needs its own leakage check.
+
+- **`volbench.econ`** (added on `feat/p2-runner`, D-029) — economic value, the
+  last metric in docs/research_design.md. `volatility_target_backtest(rows, *,
+  horizon, annual_target_vol, leverage_cap, cost_bps, periods_per_year,
+  risk_free_annual) -> VolTargetBacktest` sizes
+  `position_t = min(target_vol / forecast_vol_t, leverage_cap)` from each
+  stored forecast and reports annualized return, annualized vol, Sharpe net of
+  costs (and gross, so the cost assumption's worth is visible), maximum
+  drawdown, average leverage, turnover and cost drag.
+
+  - **The alignment.** A stored row is already `(forecast issued at origin,
+    realization at origin + h)`, so the position and the return it earns are
+    staggered by construction and the backtest is one element-wise product.
+    The forecast issued AT t sizes the position held INTO t+1, never the other
+    way round. `tests/test_econ.py::TestAlignment` pins it three ways: the
+    arithmetic by hand, a one-row shift of the realized-return column that
+    must move the Sharpe by more than 25%, and a structural check that the
+    module contains no `shift`/`reindex`/`roll` at all.
+  - **It cannot run a model.** `econ.py` imports nothing from `volbench` —
+    not `evaluate`, not a splitter, not an adapter — and `TestBoundary`
+    asserts that from the module's AST and its bound globals. Economic value
+    is computed after the fact from a table whose temporal integrity is
+    already established and hashed.
+  - **Conventions, stated because a Sharpe means nothing without them.**
+    `realized_return` is a log return; sizing uses it as-is (consistent units
+    with the forecast variance) and the P&L converts with `expm1` before
+    levering, so the equity curve compounds like capital and the drawdown is a
+    drawdown of capital. Annualization is **per asset** — 252 for equities,
+    365 for crypto (`periods_per_year_for`, whose crypto list is pinned
+    against `CRYPTO_PANEL` by test, D-024's discipline). The vol target is
+    quoted annualized (10% default) and converted to daily units exactly once,
+    so one target means one risk on either calendar. Costs are `cost_bps`
+    (default **10**, docs/research_design.md) on `|position_t -
+    position_{t-1}|`, with the first day charged against a flat book. The
+    risk-free rate defaults to 0 and no financing spread on leverage is
+    modelled. An unusable forecast sizes to **zero** rather than being
+    dropped — dropping would splice non-adjacent days into one turnover step
+    and under-charge costs — and `n_flat` reports how often.
+  - A levered book that is wiped out is reported as such (`ruined`, a
+    `RuntimeWarning`, equity floored at zero) rather than compounded through a
+    negative wealth.
 
 ### Benchmarks — `volbench.benchmarks`
 
 **Added beyond the plan.** `benchmarks/toy.py` composes all three streams over
 a synthetic series: since the Phase-2 integration, **8** models — the five
-of M2 (naive, EWMA, GARCH, GARCH-t, HAR) plus AutoETS, AutoARIMA and
+of M2 (naive, EWMA, GARCH, GARCH-t, HAR — the last as `har_rv-smearing`
+since D-030) plus AutoETS, AutoARIMA and
 LightGBM on the log-RV series — × 200 rolling origins, ~1 minute, byte-
 identical across runs; the three classical models are the *cheap* Phase-2
 additions and the only ones in `make reproduce`. `benchmarks/smoke_tsfm.py`
@@ -648,14 +814,25 @@ stay in `volbench.models`, as does the private `_rv`), `PatchTST`/
 `FittedPatchTST` — plus `ForecastModel`/`FittedModel`,
 `run_backtest`/`forecast_moments`/`DEFAULT_LEVELS`/`SupportsUpdate`/
 `ModelFactory`, `ResultsStore` and the config-hash helpers,
-`Executor`/`SerialExecutor`, `mse`/`qlike`/`pinball`, the inference entry
-points (`diebold_mariano`, `model_confidence_set`, `loss_matrix`,
-`dm_matrix`, `compare_models` and their result types), the VaR-backtest ones
-(`kupiec_pof`, `christoffersen`, `fz0_loss`, `expected_shortfall`,
-`var_backtest` and their result types) and — since `feat/p2-protocol` — the
-invalid-target policy (`FitSeries`, `InvalidTargetPolicy`,
-`DEFAULT_INVALID_TARGET_POLICY`, `InsufficientHistoryError`,
-`valid_target_mask`, `invalid_target_mask`).
+`Executor`/`SerialExecutor`/`ProcessExecutor`, `mse`/`qlike`/`pinball`, the
+inference entry points (`diebold_mariano`, `model_confidence_set`,
+`loss_matrix`, `dm_matrix`, `compare_models` and their result types), the
+VaR-backtest ones (`kupiec_pof`, `christoffersen`, `fz0_loss`,
+`expected_shortfall`, `var_backtest` and their result types), since
+`feat/p2-protocol` the invalid-target policy (`FitSeries`,
+`InvalidTargetPolicy`, `DEFAULT_INVALID_TARGET_POLICY`,
+`InsufficientHistoryError`, `valid_target_mask`, `invalid_target_mask`), and
+since `feat/p2-runner` the grid runner (`run_grid`, `GridSpec`,
+`ModelConfig`, `ProtocolArm`, `AssetData`, `DataSource`,
+`MappingDataSource`, `CellOutcome`, `RunManifest`, `read_grid_results`) and
+economic value (`volatility_target_backtest`, `VolTargetBacktest`,
+`periods_per_year_for`).
+
+Kept out of the root and reachable at their modules: `volbench.execute`'s
+`kernel_signature`/`KERNEL_PIN_VAR` (a D-026 diagnostic, not vocabulary),
+`volbench.runner`'s `Cell`/`Lane`/`CellStatus`/`LANE_ORDER` (grid internals
+a caller describes a grid without), and `volbench.models.patchtst`'s
+`resolve_device_class`.
 
 Per-source ingestion — the Stooq and Binance downloaders, their error types and
 symbol maps, the bring-your-own-data loaders — and the study's own panel
@@ -684,7 +861,31 @@ the `package_version()` that enters every config hash.
    moves the content digest of a computed proxy and every hash built on it.
    CI and `make reproduce` pin the v3-or-lower family
    (`NPY_DISABLE_CPU_FEATURES`); across families the store misses (recomputes)
-   rather than serving the wrong artefact.
+   rather than serving the wrong artefact. **It is also a claim across
+   execution backends** (D-011): `ProcessExecutor` produces fragments byte-
+   identical to `SerialExecutor` over a whole grid, checked on the parquet
+   bytes with an inert-proof companion
+   (`tests/test_runner.py::TestSerialParallelIdentity`), and the pool carries
+   the parent's kernel family into every worker so the two claims cannot come
+   apart. **And a claim per device class** for the one model that estimates
+   under an RNG: PatchTST's `device_class` is hashed (D-031), so a CPU and a
+   GPU fragment are two cells rather than one hash with two answers.
+
+   **OPEN, found on `feat/p2-runner` and not fixed there** (docs/P3_RUNNER.md
+   §6): byte-identity of the **GARCH** cells is *also* a claim within one
+   **OpenBLAS thread count**. With `OPENBLAS_NUM_THREADS=1` against the
+   machine default, `garch11` and `garch11_t` forecasts move (max relative
+   9.2e-5 and 5.5e-1 respectively on the toy fixture); the other six models
+   are bit-identical. Threaded BLAS reorders a reduction by an ulp and arch's
+   SLSQP amplifies it into a different optimum. Two runs at the *same* thread
+   count are bit-identical, and serial and pooled runs agree exactly (they
+   share the parent's environment), so nothing in this repo is presently
+   wrong — but unlike D-026's case this moves **results without moving the
+   config hash**, so a store filled on a 32-thread box and topped up on a
+   2-core runner would hold two answers under one hash. The fix is the same
+   shape as D-026 — pin the thread count in the Makefile and CI — and it is a
+   protocol decision that moves the GARCH numbers, so it is reported rather
+   than taken as a side effect. See the open questions.
 4. Scalers/feature transforms fit on train windows only, inside the splitter's
    contract.
 
@@ -719,14 +920,13 @@ the guard, and keeps its own index assertion as a redundant belt.
       forecast for 21 days" — **resolved on `m2/evaluator-hardening`**, see
       "Refit protocol". Still open: per-model refit-schedule overrides.
 - [ ] Multi-horizon: separate `Distribution` per h, or joint object? (`horizon`
-      exists in the splitter and in result rows; only h=1 is exercised.)
+      exists in the splitter, in result rows and — since `feat/p2-runner` — as
+      a grid dimension; only h=1 is exercised.)
 - [x] Should a range/RV proxy feeding HAR be reconciled with the close-to-close
       return target it is scored against? **Resolved (D-016):** HAR is fed and
       scored on `overnight_plus_range_variance`, the close-to-close estimator.
-      Two follow-ups remain open (docs/M2_NOTES.md): HAR's retransformation
-      sensitivity to the target's noise, and whether the return-fed models
-      should also score QLIKE against the close-to-close proxy rather than
-      Parkinson.
+      Both follow-ups (docs/M2_NOTES.md) are now closed: the shared scoring
+      target is D-017, and HAR's retransformation sensitivity is D-030 (below).
 - [x] TSFM context construction — **settled on `feat/p2-models-tsfm`**: the
       context is the trailing window of the splitter's `train` indices (ends
       at the origin inclusive), capped by `context_length` and the checkpoint's
@@ -742,17 +942,26 @@ the guard, and keeps its own index assertion as a redundant belt.
       bounded, measured amount (0.28 vs 0.38 log-space variance). An
       out-of-fold estimate inside the training window is the fix; it must be
       a *temporal* fold, never a random one.
-- [ ] **HAR's retransformation** is still its own Gaussian `resid_var`
-      correction while every Phase-2 log-RV model goes through `_rv`; moving
-      HAR onto `_rv` (smearing default) is a modelling change that would
-      move its hash and its numbers, so it is not an integration side effect.
+- [x] **HAR's retransformation** — **resolved on `feat/p2-runner` (D-030)**:
+      HAR goes through `_rv` with Duan smearing as the default, like every
+      other log-RV model, with `retransform="gaussian"` kept as the arm that
+      reproduces the pre-0.5.0 numbers. Measured on the toy fixture:
+      forecast/true 1.1320 → 1.1102, QLIKE-vs-truth 0.0263 → 0.0242. Its hash
+      and its numbers moved, deliberately and before any grid freeze. Still
+      open, and now the only open half: the residual over-inflation is HAR's
+      own *one-step in-sample* factor, so a component overnight+intraday HAR —
+      or an out-of-fold factor, the item above — remains the deeper fix.
 - [ ] **TSFM grid-mean truncation** — the same family as D-014's bug, now on
       the checkpoint's own grid where no parametric object exists. Revisit if
       TSFM QLIKE looks odd; tail-extrapolation of the grid would be a patch on
       a lossy representation, the same objection D-014 recorded.
-- [ ] **PatchTST per-device-class reproducibility** — `device` is unhashed,
-      so a CPU and a GPU fragment can share a hash and differ; whether to hash
-      the device class, or to pin the paper's runs to one, is a protocol call.
+- [x] **PatchTST per-device-class reproducibility** — **resolved on
+      `feat/p2-runner` (D-031)**: `spec()` carries `device_class`, so a CPU
+      fragment and a GPU fragment of one configuration are two cells and the
+      store can never serve one for the other. The ordinal is not hashed
+      (placement, not identity), and two different GPU models are still not
+      distinguished — the same qualification D-026 puts on the numpy kernel
+      family, so the paper states its hardware.
 - [x] **Pending protocol decisions the panel report raised** (deliberately not
       made at integration) — **all three resolved on `feat/p2-protocol`**:
       the invalid-target policy is D-018 (drop unusable days from fit windows,
@@ -765,6 +974,37 @@ the guard, and keeps its own index assertion as a redundant belt.
       with invalid days. Documented everywhere it applies; what remains open
       is a presentation question — whether the paper reports those models'
       memory in calendar days or in observations.
+- [ ] **The OpenBLAS thread count changes GARCH's numbers** (found on
+      `feat/p2-runner`, docs/P3_RUNNER.md §6; measured, reproducible, and the
+      only model family affected of the eight). It moves results *without*
+      moving a config hash, which is a strictly worse failure mode than
+      D-026's — that one causes a cache miss, this one lets the store serve
+      one answer for another. Recommended: pin `OPENBLAS_NUM_THREADS` in the
+      Makefile and CI exactly as D-026 pins `NPY_DISABLE_CPU_FEATURES`, and
+      restate the determinism rule as "same seed, same code, same data, same
+      kernel family, **same BLAS thread count**". That moves every GARCH
+      number, so it is a protocol decision for the planning machine to number
+      and take, not an executor side effect — and it should be taken **before**
+      any grid freeze, for the same reason D-030 was.
+- [ ] **Concurrent lanes.** The runner runs the CPU lane to completion before
+      the GPU lane, because the CPU lane forks and forking after a CUDA
+      context exists is undefined behaviour. The GPU therefore idles while the
+      CPU lane runs. Running both at once needs the GPU lane in its own
+      process from the start (`gpu_executor=ProcessExecutor(workers=1)`) and a
+      thread in the parent; whether the wall-clock is worth that is an H4
+      measurement nobody has taken yet.
+- [ ] **Slurm-array executor.** D-011's third execution path is still
+      unbuilt. `ProcessExecutor` is the second; the byte-identity gate is
+      written so a third backend joins it by parametrization.
+- [ ] **Economic value beyond one cell.** `econ.py` backtests one cell at a
+      time by design. Portfolio-level questions — several assets sized
+      together, a cross-sectional vol target — are out of scope for v1
+      (docs/research_design.md's guard rail excludes multivariate work), but
+      the aggregation layer over per-asset results is not designed yet.
+- [ ] **Financing the leverage.** The economic-value Sharpe nets transaction
+      costs but not a borrowing spread on `position > 1`, and
+      `risk_free_annual` defaults to 0. Whether the paper reports a financed
+      variant is a presentation decision.
 - [ ] **The 1e-5 bar-repair threshold** still has no decision entry
       (docs/PANEL_REPORT.md §9). D-018 lowered the stakes — a NaN'd day now
       costs its own scored row and nothing else — but the split between
