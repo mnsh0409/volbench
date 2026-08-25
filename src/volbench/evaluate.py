@@ -710,7 +710,10 @@ def run_backtest(
         blocks span time. volbench cannot check this — a model constructed
         with a reference to the full series can always cheat — so the
         guarantee this module makes is narrower and exact: *volbench itself
-        passes a model nothing but ``fit_series[origin.train]``.*
+        passes a model nothing but observations at positions ``<=
+        origin.origin`` of ``fit_series``* — ``fit_series[origin.train]``
+        exactly, or, under D-018's compaction policy, the last
+        ``len(origin.train)`` valid ones of them.
     series:
         Daily returns. Supplies both the training input and the realized
         target for CRPS, log score, pinball and VaR hits.

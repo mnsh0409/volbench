@@ -368,6 +368,37 @@ class TestTooLittleHistoryIsExplicit:
             frame["missing_reason"].astype(str).str.contains("InsufficientHistory").sum() == 1
         )
 
+    def test_a_short_scheduled_fit_fails_its_whole_block_like_any_other(self) -> None:
+        """Not a new rule — the existing one, applied to a new failure.
+
+        A failed *scheduled* fit costs its whole refit block, because the
+        alternative is refitting off-schedule and reporting a cadence the run
+        did not use. Compaction can only trigger that at a series' start, so
+        the cost is bounded by one block; pinned here so the interaction is
+        explicit rather than discovered later in a results table.
+        """
+        n, window, refit_every = 60, 10, 21
+        rv = np.full(n, 4e-4)
+        rv[3] = 0.0
+        index = pd.bdate_range("2020-01-01", periods=n, tz="UTC")
+        frame = run_backtest(
+            lambda: WindowValidator(),
+            pd.Series(np.full(n, 0.001), index=index),
+            pd.Series(rv, index=index),
+            RollingOriginSplitter(window=window, horizon=1, refit_every=refit_every),
+            seed=1,
+            asset="BLOCK",
+            proxy_name="rv",
+            fit_series=FitSeries.compact(pd.Series(rv, index=index)),
+        ).sort_values("origin_index")
+        short = frame["missing_reason"].astype(str).str.contains("InsufficientHistory")
+        # The whole first block, and every row of it names the origin that failed.
+        assert int(short.sum()) == refit_every
+        assert frame.loc[short, "origin_index"].tolist() == list(range(9, 9 + refit_every))
+        assert frame.loc[short, "missing_reason"].astype(str).str.contains("@9").all()
+        # The next scheduled fit has enough history and the cell recovers.
+        assert not bool(short.iloc[refit_every:].any())
+
 
 # --------------------------------------------------------------------------
 # leakage
