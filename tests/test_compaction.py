@@ -266,7 +266,7 @@ class TestWindowIsTheLastNValidObservations:
 
         kept = fit.window_positions(train)
         assert kept.size == train.size == 5, "a compacted window is never short"
-        np.testing.assert_array_equal(kept, [14, 17, 18, 19, 16][:0] or [14, 16, 17, 18, 19])
+        np.testing.assert_array_equal(kept, [14, 16, 17, 18, 19])
         np.testing.assert_array_equal(fit.window(train), values[[14, 16, 17, 18, 19]])
         # The span stretched from 5 calendar days to 6; the end did not move.
         assert kept[-1] == train[-1] == 19
