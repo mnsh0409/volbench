@@ -10,7 +10,7 @@
 > was measured, what was gated, and the two things that were found rather than
 > built. It is a new file rather than an append to `docs/P2_INTEGRATION.md`
 > because that file is a planning-folder mirror and this task did not instruct
-> an edit to it (CLAUDE.md); §7 below flags the drift it should absorb.
+> an edit to it (CLAUDE.md); §8 below flags the drift it should absorb.
 
 ---
 
@@ -119,10 +119,10 @@ On wall-clock, stated honestly rather than flattered:
 
 - At `refit_every=1` (cells of ~3.8 s) the pool reaches **3.8× at 8 workers**
   and gets no better at 16. H4 asks for ≥5× on 8 cores; **this measurement
-  does not reach it**, and the reason is visible in §6: each worker's own BLAS
+  does not reach it**, and the reason is visible in §7: each worker's own BLAS
   is multi-threaded, so 8 workers on 32 logical cores are already
   oversubscribed. Single-threading the workers gets to 4.7×–5.1× — and is
-  *rejected*, because it changes GARCH's numbers (§6). The honest reading is
+  *rejected*, because it changes GARCH's numbers (§7). The honest reading is
   that H4's engineering claim needs a machine-level thread budget decided
   alongside the reproducibility decision, not a runner change.
 - At `refit_every=21` (cells of ~0.3 s) the speedup is only 1.6×: pool startup
@@ -131,7 +131,52 @@ On wall-clock, stated honestly rather than flattered:
 
 ---
 
-## 5. Found while measuring — `fork` deadlocks after LightGBM
+## 5. End to end on the 4090 — both lanes, then economic value
+
+The lane design and the econ module exercised together, on the GPU box, with a
+real GPU model rather than a stand-in. 12 cells: 2 assets × 5 CPU-lane models
+fanned out across 8 workers, plus **PatchTST declared `lane="gpu"`** and
+serialized. 26.6 s wall, 12/12 computed, 0 failed, no `missing_reason` anywhere.
+
+```
+ 0 TOY-A ewma      lane=cpu computed rows=200 missing=0   0.05s
+ 1 TOY-A garch11   lane=cpu computed rows=200 missing=0   0.38s
+ 2 TOY-A har       lane=cpu computed rows=200 missing=0   0.06s
+ 3 TOY-A lgbm      lane=cpu computed rows=200 missing=0   3.06s
+ 4 TOY-A naive     lane=cpu computed rows=200 missing=0   0.04s
+ 5 TOY-A patchtst  lane=gpu computed rows=200 missing=0  11.76s
+ 6..11 the same six for TOY-B (rows=197)
+```
+
+Note cell 3 and cell 5: LightGBM runs **in the pool** while PatchTST runs
+serialized on the GPU. That is the routing working — and it is also the
+configuration §6 says a plain `fork` would have deadlocked in — except that
+here the parent never fits anything itself, which is the one arrangement under
+which plain `fork` is still safe.
+
+Economic value then computed straight off the stored rows — no model re-run,
+no evaluator import:
+
+```
+ewma       Sharpe -1.247 (gross -1.199)  return -11.67%  vol 9.58%  maxDD 15.75%  lev 0.62
+garch11    Sharpe -1.237 (gross -1.193)  return -10.51%  vol 8.68%  maxDD 14.36%  lev 0.56
+har        Sharpe -1.456 (gross -1.402)  return -12.58%  vol 8.96%  maxDD 15.11%  lev 0.57
+lgbm       Sharpe -1.622 (gross -1.511)  return -13.91%  vol 8.99%  maxDD 16.09%  lev 0.58
+naive      Sharpe -1.518 (gross -1.509)  return -11.39%  vol 7.77%  maxDD 13.88%  lev 0.47
+patchtst   Sharpe -1.308 (gross -1.293)  return -11.48%  vol 9.01%  maxDD 15.36%  lev 0.57
+```
+
+**Read only the vol and leverage columns.** The toy series is generated with
+**zero drift**, so a vol-targeted position on it has zero expected return by
+construction and every Sharpe here is noise minus costs — negative, as it
+should be. What the run does check is that the sizing works: realized vol lands
+at 7.8–9.6% against a 10% target on a 200-day sample, and average leverage
+tracks each model's mean forecast vol. No number in this table says anything
+about a model.
+
+---
+
+## 6. Found while measuring — `fork` deadlocks after LightGBM
 
 The first grid benchmark hung. Bisected to a single cause, reproducible:
 
@@ -178,7 +223,7 @@ checks, so the documented usage is the tested one.
 
 ---
 
-## 6. Found while measuring — the OpenBLAS thread count changes GARCH's numbers
+## 7. Found while measuring — the OpenBLAS thread count changes GARCH's numbers
 
 **Not introduced by this branch, not fixed by it, and the more serious of the
 two findings.** Reported here in full because it is a reproducibility defect
@@ -223,7 +268,7 @@ any grid freeze, for exactly the reason the brief gave for D-030.
 
 ---
 
-## 7. Drift flagged, not edited
+## 8. Drift flagged, not edited
 
 - `docs/P2_INTEGRATION.md` §3.4 ("`device` is not hashed") and §6.6 ("what
   'the same model' means across devices — OPEN") are superseded by D-031;
@@ -239,9 +284,9 @@ any grid freeze, for exactly the reason the brief gave for D-030.
 
 ---
 
-## 8. Gates
+## 9. Gates
 
-### 8.1 Local
+### 9.1 Local
 
 | gate | result |
 |---|---|
@@ -259,7 +304,7 @@ The 3.12/3.13 legs skip six more tests than 3.11 because those environments
 carry no torch (the PatchTST CPU smoke tests `importorskip`); CI installs
 `torch-cpu` on every leg and runs them.
 
-### 8.2 Toy benchmark at 0.5.0
+### 9.2 Toy benchmark at 0.5.0
 
 ```
 label       model                   CRPS      log score   QLIKE    mean σ̂
@@ -286,21 +331,21 @@ lgbm      5628598d…262957933   naive  da5fb0f6…4cb0373901a
 0.005852 / moirai 0.005853 / patchtst 0.005856 CRPS — unchanged from the
 v0.3.0 record; four new hashes with the version, PatchTST's also with D-031.
 
-### 8.3 CI
+### 9.3 CI
 
 `.github/workflows/ci.yml` on the branch push — ubuntu-latest × Python
 3.11/3.12/3.13, `--extra classical --extra torch-cpu`, ruff + mypy + pytest,
 with `NPY_DISABLE_CPU_FEATURES` pinned per D-026. Green on the branch
 (run 32856459336, 17m35s, and the two follow-up pushes).
 
-### 8.4 Leakage audit
+### 9.4 Leakage audit
 
 Full-diff audit against `.claude/skills/leakage-check`, with the econ
-position/return alignment as the focus: see §9.
+position/return alignment as the focus: see §10.
 
 ---
 
-## 9. Leakage check — `main...feat/p2-runner`
+## 10. Leakage check — `main...feat/p2-runner`
 
 | # | Item | Verdict |
 |---|---|---|
@@ -312,7 +357,7 @@ position/return alignment as the focus: see §9.
 | 6 | Refit schedule | **PASS** — `ProtocolArm` carries `refit_every` into the splitter and `recondition` into `run_backtest`; the runner adds no off-schedule refit. A failed scheduled fit still fails its whole block (evaluator behaviour, unchanged). |
 | 7 | TSFM context windows | **PASS** — unchanged. The runner does **not** batch across assets; the GPU lane serializes whole cells, so no cross-series padding or alignment is introduced. Batching stays open and still needs its own audit when built. |
 | 8 | Calendar alignment | **PASS** — `AssetData` carries returns, proxy and variance as one bundle and `run_backtest` re-checks their indexes are identical and ascending. Nothing in the runner reindexes or joins across assets; each cell sees exactly one asset. `econ.py` never joins anything. |
-| 9 | Caching | **PASS**, and strengthened. Resume is by `config_hash`, which already covers the data's content digests; `tests/test_runner.py::TestResumability` checks fragments are byte-identical *and unrewritten* (mtimes) after a resume. D-031 closes a real hole in this item: a PatchTST CPU fragment could previously be served for a GPU request under one hash. **Flagged, not fixed:** the OpenBLAS thread count moves GARCH results without moving the hash (§6) — item 9's failure mode exactly, at machine level rather than at cache level. |
+| 9 | Caching | **PASS**, and strengthened. Resume is by `config_hash`, which already covers the data's content digests; `tests/test_runner.py::TestResumability` checks fragments are byte-identical *and unrewritten* (mtimes) after a resume. D-031 closes a real hole in this item: a PatchTST CPU fragment could previously be served for a GPU request under one hash. **Flagged, not fixed:** the OpenBLAS thread count moves GARCH results without moving the hash (§7) — item 9's failure mode exactly, at machine level rather than at cache level. |
 | 10 | Survivorship & selection | **PASS** — the grid is declared, not selected on outcomes. `GridSpec` is expanded in full and every cell is attempted; a failed cell is recorded, never dropped, and `n_missing` keeps the evaluator's per-origin NaNs visible from the manifest, so a model cannot look good by averaging over the cells that happened to work. |
 
 ### The focus item — the economic-value alignment
@@ -366,5 +411,5 @@ green.
 ### Verdict
 
 No FIX and no FATAL findings in the diff. One pre-existing item is escalated:
-the OpenBLAS thread sensitivity (§6) is a genuine item-9 hazard — same hash,
+the OpenBLAS thread sensitivity (§7) is a genuine item-9 hazard — same hash,
 two answers — and it should be closed before the grid freeze.
