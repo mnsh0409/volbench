@@ -21,6 +21,17 @@ jobs:
       # feature the runner lacks is a silent no-op, so this is safe on every
       # runner; the Makefile's reproduce target exports the same value.
       NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
+      # Pin the BLAS to one thread (D-032). Threaded OpenBLAS reorders a
+      # reduction by an ulp and arch's SLSQP amplifies that into a different
+      # local optimum of the Student-t GARCH likelihood — 5.5e-1 relative on
+      # garch11_t (docs/P3_DETERMINISM.md §2). The thread count moves no
+      # content digest, so it is hashed explicitly instead
+      # (`environment.blas_threads`); a runner that ran unpinned would compute
+      # different numbers under the pinned identities this repo commits.
+      # Job-level, so lint, type and test legs all agree, and so a pool the
+      # suite starts inherits it. The Makefile exports the same values.
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
     strategy:
       fail-fast: false
       matrix:

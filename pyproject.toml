@@ -1,6 +1,6 @@
 [project]
 name = "volbench"
-version = "0.5.0"
+version = "0.6.0"
 description = "Leakage-safe, reproducible evaluation of probabilistic volatility and tail-risk forecasts ??from GARCH to time-series foundation models."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -220,6 +220,15 @@ module = [
 ignore_missing_imports = true
 follow_imports = "skip"
 
+# threadpoolctl ships no py.typed. It is a *transitive* dependency (via
+# statsforecast) that volbench never declares, and it is imported in exactly
+# one place — `determinism._observed_thread_pools`, behind a try/except, for a
+# manifest field that is never hashed. Treating it as untyped keeps mypy's
+# verdict independent of whether the machine happens to have it.
+[[tool.mypy.overrides]]
+module = ["threadpoolctl"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
@@ -228,4 +237,6 @@ markers = [
     "tsfm: needs foundation-model weights (and ideally a GPU); opt in with VOLBENCH_RUN_TSFM=1",
     "timegpt: calls the TimeGPT API; runs only when NIXTLA_API_KEY is set",
     "gpu: trains on a CUDA device; opt in with VOLBENCH_RUN_GPU=1",
+    "pinned_identity: asserts a committed config_hash; needs the D-032 BLAS thread pin",
+    "slow_determinism: spawns subprocesses at two BLAS thread counts (D-032 gate)",
 ]

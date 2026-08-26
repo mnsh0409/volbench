@@ -6,6 +6,7 @@ import pytest
 from volbench.dist import Normal, StudentT
 from volbench.models import GARCH, gjr_garch
 from volbench.models.ewma import FittedEWMA
+from volbench.models.garch import FIT_TOL, NU_BOUNDS
 
 
 def _simulate_garch11(
@@ -98,6 +99,89 @@ class TestGARCHNonConvergenceFallback:
         fitted = GARCH(dist="normal", fallback_lambda=0.9).fit(np.zeros(300))
         assert fitted.spec()["fallback_lambda"] == 0.9
 
+    def test_a_fallback_says_so_and_names_the_estimator_that_ran(self) -> None:
+        """D-032. Falling back is the right behaviour and was invisible: a cell
+        that ran EWMA on some of its origins scored like one that ran none."""
+        fitted = GARCH(dist="normal").fit(np.zeros(300))
+        diagnostics = fitted.fit_diagnostics()
+        assert diagnostics.fallback == "ewma"
+        assert diagnostics.converged is False
+        assert diagnostics.status().startswith("fallback=ewma")
+
+    def test_a_clean_fit_says_ok_and_carries_the_optimizer_flag(self) -> None:
+        rng = np.random.default_rng(4)
+        fitted = GARCH(dist="normal").fit(rng.standard_normal(400) * 0.01)
+        status = fitted.fit_diagnostics().status()
+        assert status.startswith("ok|flag=0")
+
+    def test_the_status_survives_re_conditioning(self) -> None:
+        """``update`` runs no optimizer, so a window re-filtered at the
+        parameters of a fit that fell back is still a fallback forecast."""
+        train = np.zeros(300)
+        fitted = GARCH(dist="normal").fit(train)
+        assert fitted.update(train).fit_diagnostics().status() == (
+            fitted.fit_diagnostics().status()
+        )
+
+
+class TestNuIsBounded:
+    """D-032 item 3. ``arch`` bounds ``nu`` at 500; a 500-observation window
+    carries no information about tail thickness up there, so the likelihood is
+    flat along it — and a flat direction is what let a last-ulp BLAS difference
+    move SLSQP into a different local optimum.
+    """
+
+    def test_gaussian_data_pins_nu_at_the_upper_bound_instead_of_wandering(self) -> None:
+        rng = np.random.default_rng(3)
+        fitted = GARCH(dist="studentst").fit(rng.standard_normal(500) * 0.01)
+        assert fitted.result is not None
+        nu = float(fitted.result.params["nu"])
+        assert nu <= NU_BOUNDS[1] + 1e-9
+        # Not merely "inside the bound": on Gaussian data the bound is where
+        # the answer lands, which is the honest reading of "nu is not
+        # identified here" rather than a number picked out of a flat region.
+        assert nu > NU_BOUNDS[1] - 1e-6
+        assert "nu_at_bound" in fitted.fit_diagnostics().status()
+
+    def test_genuinely_fat_tails_stay_inside_the_bound(self) -> None:
+        """The bound must not turn every Student-t into a Gaussian. Real tail
+        thickness is estimable and has to survive."""
+        rng = np.random.default_rng(5)
+        heavy = rng.standard_t(4.0, size=1500) * 0.01
+        fitted = GARCH(dist="studentst").fit(heavy)
+        assert fitted.result is not None
+        nu = float(fitted.result.params["nu"])
+        assert NU_BOUNDS[0] < nu < NU_BOUNDS[1] - 1.0, nu
+        assert "nu_at_bound" not in fitted.fit_diagnostics().status()
+
+    def test_the_bounds_are_hashed_only_where_they_bind(self) -> None:
+        """A normal-innovations GARCH has no degrees of freedom to bound, so
+        recording them there would split two identical experiments over a
+        setting neither used."""
+        assert "nu_bounds" in GARCH(dist="studentst").spec()
+        assert "nu_bounds" not in GARCH(dist="normal").spec()
+        assert GARCH(dist="studentst").spec() != GARCH(
+            dist="studentst", nu_bounds=(2.1, 40.0)
+        ).spec()
+
+    def test_the_tolerance_is_hashed_for_both_distributions(self) -> None:
+        """It changes the optimizer's stopping point whatever the innovations."""
+        for dist in ("normal", "studentst"):
+            assert GARCH(dist=dist).spec()["fit_tol"] == FIT_TOL  # type: ignore[arg-type]
+            assert GARCH(dist=dist).spec() != GARCH(  # type: ignore[arg-type]
+                dist=dist, fit_tol=1e-8  # type: ignore[arg-type]
+            ).spec()
+
+    def test_bounds_that_admit_an_undefined_variance_are_refused(self) -> None:
+        """At nu <= 2 the predictive variance nu/(nu-2) does not exist, and a
+        model whose variance forecast is undefined is not a volatility model."""
+        with pytest.raises(ValueError, match="nu_bounds"):
+            GARCH(dist="studentst", nu_bounds=(2.0, 50.0))
+        with pytest.raises(ValueError, match="nu_bounds"):
+            GARCH(dist="studentst", nu_bounds=(30.0, 10.0))
+        with pytest.raises(ValueError, match="fit_tol"):
+            GARCH(dist="studentst", fit_tol=0.0)
+
 
 class TestGARCHSpec:
     def test_spec_stable_across_identical_constructions(self) -> None:
@@ -108,6 +192,7 @@ class TestGARCHSpec:
         assert base != GARCH(o=1, dist="normal").spec()
         assert base != GARCH(o=0, dist="studentst").spec()
         assert base != GARCH(o=0, dist="normal", fallback_lambda=0.9).spec()
+        assert base != GARCH(o=0, dist="normal", fit_tol=1e-8).spec()
 
     def test_invalid_construction_rejected(self) -> None:
         with pytest.raises(ValueError):

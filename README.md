@@ -2,7 +2,7 @@
 
 **Leakage-safe, reproducible evaluation of probabilistic volatility and tail-risk forecasts — from GARCH to time-series foundation models.**
 
-> Status: pre-alpha (v0.5.0-runner — Phase 2 complete). Built toward a submission to the *International Journal of Forecasting* special section on Open-Source Forecasting. API will change without notice until v1.0.
+> Status: pre-alpha (v0.6.0-determinism — Phase 2 complete). Built toward a submission to the *International Journal of Forecasting* special section on Open-Source Forecasting. API will change without notice until v1.0.
 
 ## Why
 
@@ -12,7 +12,7 @@ Volatility and tail-risk forecasts are the workhorses of risk management, yet op
 
 1. **Temporal integrity.** No code path lets information from `t' > t` influence a forecast for `t`. `RollingOriginSplitter` is the only sanctioned producer of train/test indices (`tests/test_splitter.py` is the contract).
 2. **Probabilistic outputs are first-class.** Every model adapter returns a `Distribution` (parametric, ensemble, or quantile-grid) — never a bare point array. Scores: CRPS (closed-form where available), log score, pinball; proxy-robust point losses (QLIKE, MSE) per Patton (2011).
-3. **Determinism.** Every entry point takes a seed; every result row carries a config hash over the model spec, the data's *content* digest, the splitter, the seed and the package version; `make reproduce` must stay green.
+3. **Determinism.** Every entry point takes a seed; every result row carries a config hash over the model spec, the data's *content* digest, the splitter, the seed, the package version and the BLAS thread count; `make reproduce` must stay green. The full rule is *same seed, same code, same data, same numpy SIMD kernel family (D-026), same BLAS thread count (D-032)* — the last two are machine properties that were measured to move numbers, so `make check` and CI pin both (`NPY_DISABLE_CPU_FEATURES`, `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`). Run the suite through `make check` rather than bare `pytest`: the tests that assert committed identities skip without the pin, because an unpinned machine computes a different — and equally correct — hash.
 
 ## Quickstart
 
@@ -32,12 +32,17 @@ results = run_backtest(
     asset="DEMO",
     proxy_name="squared_return",
 )
-print(results[["origin_index", "forecast_var", "crps", "qlike", "hit_0p01"]].head())
+print(results[["origin_index", "forecast_var", "crps", "qlike", "hit_0p01", "fit_status"]].head())
 ```
 
 A model is anything with `name`, `spec()` and `fit(train) -> FittedModel`, where
 `FittedModel.predict(h)` returns a `Distribution` over the **next-period return**
-— its variance is the variance forecast, always in daily units.
+— its variance is the variance forecast, always in daily units. A fitted model
+may also implement `fit_diagnostics()`; where it does, `fit_status` says how
+that fit went (`ok|...`, or `fallback=<estimator>|...` where an adapter
+degraded rather than raised), and `run_grid` counts those per cell so a result
+that quietly ran a different estimator on some origins is legible rather than
+hidden.
 
 To see the whole pipeline run end to end:
 
@@ -53,7 +58,7 @@ make check                               # ruff, mypy --strict, pytest; EXTRAS="
 make smoke-tsfm                          # local only: foundation models + PatchTST on the toy series
 ```
 
-**Built (Phase 1 + Phase 2, v0.5.0):** data adapters with explicit licensing
+**Built (Phase 1 + Phase 2, v0.6.0):** data adapters with explicit licensing
 and the D-004/D-012/D-020 evaluation panel (`volbench.data`), daily variance
 proxies, thirteen model adapters — naive, EWMA, GARCH/GJR-GARCH, HAR-RV,
 AutoETS/AutoARIMA (statsforecast), LightGBM, PatchTST, and the zero-shot

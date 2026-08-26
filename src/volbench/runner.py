@@ -86,8 +86,10 @@ from typing import Any, Final, Literal, Protocol, runtime_checkable
 import pandas as pd
 
 from volbench.compaction import DEFAULT_INVALID_TARGET_POLICY, FitSeries, InvalidTargetPolicy
+from volbench.determinism import environment_report
 from volbench.evaluate import DEFAULT_LEVELS, ModelFactory, Recondition, run_backtest
 from volbench.execute import Executor, SerialExecutor
+from volbench.models.base import FitDiagnostics
 from volbench.results import ResultsStore
 from volbench.splitter import RollingOriginSplitter
 
@@ -400,6 +402,27 @@ class CellOutcome:
     n_missing: int
     wall_clock_s: float
     error: str | None = None
+    #: Scheduled fits this cell made that reported a status at all — the
+    #: denominator the two counts below are rates over. Zero for a model that
+    #: reports none, which is why they are counts and not a bare rate: a rate
+    #: over an unknown denominator is the statistic that gets believed.
+    n_fits: int = 0
+    #: Fits that ran a *fallback* estimator instead of the model asked for
+    #: (D-032). A GARCH-t cell with ``n_fits_fallback = 40`` of ``n_fits = 200``
+    #: is 20% an EWMA cell, and that is now readable without opening a parquet.
+    n_fits_fallback: int = 0
+    #: Fits whose optimizer did not converge — the fallbacks included, since a
+    #: fallback is what non-convergence causes here.
+    n_fits_nonconverged: int = 0
+
+    @property
+    def fallback_rate(self) -> float:
+        """``n_fits_fallback / n_fits``; ``nan`` when nothing reported a status.
+
+        ``nan`` rather than ``0.0`` on purpose: "no fit fell back" and "no fit
+        said" are different claims, and only one of them is evidence.
+        """
+        return self.n_fits_fallback / self.n_fits if self.n_fits else float("nan")
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -413,6 +436,9 @@ class CellOutcome:
             "config_hash": self.config_hash,
             "n_rows": self.n_rows,
             "n_missing": self.n_missing,
+            "n_fits": self.n_fits,
+            "n_fits_fallback": self.n_fits_fallback,
+            "n_fits_nonconverged": self.n_fits_nonconverged,
             "wall_clock_s": round(self.wall_clock_s, 6),
             "error": self.error,
         }
@@ -429,6 +455,27 @@ class RunManifest:
     """
 
     cells: tuple[CellOutcome, ...]
+    #: What the *machine* contributed (D-026, D-032): the BLAS thread count and
+    #: build, the numpy kernel signature, the pins as they stood. Reported, not
+    #: hashed — the hash carries only ``blas_threads``, because only that was
+    #: measured to move a number. Defaulted rather than required so a manifest
+    #: can still be built by hand in a test.
+    environment: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def n_fits(self) -> int:
+        """Scheduled fits across the grid that reported a status."""
+        return sum(c.n_fits for c in self.cells)
+
+    @property
+    def n_fits_fallback(self) -> int:
+        """Fits that ran a fallback estimator instead of the model asked for."""
+        return sum(c.n_fits_fallback for c in self.cells)
+
+    @property
+    def fallback_cells(self) -> tuple[CellOutcome, ...]:
+        """Cells where at least one fit fell back — what to look at first."""
+        return tuple(c for c in self.cells if c.n_fits_fallback)
 
     @property
     def n_computed(self) -> int:
@@ -469,6 +516,9 @@ class RunManifest:
             "n_computed": self.n_computed,
             "n_cached": self.n_cached,
             "n_failed": self.n_failed,
+            "n_fits": self.n_fits,
+            "n_fits_fallback": self.n_fits_fallback,
+            "environment": dict(self.environment),
             "cells": [c.as_json() for c in self.cells],
         }
 
@@ -486,9 +536,14 @@ class RunManifest:
         return destination
 
     def __str__(self) -> str:
+        fallback = (
+            f", {self.n_fits_fallback}/{self.n_fits} fits fell back"
+            if self.n_fits_fallback
+            else ""
+        )
         return (
             f"RunManifest({len(self.cells)} cells: {self.n_computed} computed, "
-            f"{self.n_cached} cached, {self.n_failed} failed)"
+            f"{self.n_cached} cached, {self.n_failed} failed{fallback})"
         )
 
 
@@ -549,6 +604,7 @@ def _run_cell(task: _CellTask) -> CellOutcome:
             config_hash=None,
             n_rows=0,
             n_missing=0,
+            fits=(0, 0, 0),
             elapsed=time.perf_counter() - started,
             error=f"{type(exc).__name__}: {exc}",
         )
@@ -558,6 +614,7 @@ def _run_cell(task: _CellTask) -> CellOutcome:
         config_hash=str(frame.attrs["config_hash"]),
         n_rows=len(frame),
         n_missing=_count_unscorable(frame),
+        fits=_count_fits(frame),
         elapsed=time.perf_counter() - started,
         error=None,
     )
@@ -576,6 +633,40 @@ def _count_unscorable(frame: pd.DataFrame) -> int:
     return int((frame["missing_reason"].fillna("") != "").sum())
 
 
+def _count_fits(frame: pd.DataFrame) -> tuple[int, int, int]:
+    """``(n_fits, n_fallback, n_nonconverged)`` over the cell's *scheduled fits*.
+
+    Counted per distinct ``fit_origin``, not per row. A block of 21 origins
+    rests on one fit, and a cell at horizon 5 writes five rows per origin, so
+    counting rows would report a fallback rate that is really a row-weighting
+    of the refit cadence and the horizon. The question this answers — "how many
+    of the fits this cell made were not the model asked for?" — has scheduled
+    fits as its denominator and nothing else.
+
+    Rows with no fit behind them (``fit_origin == -1``) and models that report
+    no status are excluded from the denominator rather than counted as clean:
+    an unreported fit is not a converged one (see ``CellOutcome.fallback_rate``).
+
+    A cached cell is counted from the fragment that was read, so a resumed grid
+    reports the same rates as the run that filled it.
+    """
+    if "fit_status" not in frame.columns or "fit_origin" not in frame.columns:
+        return (0, 0, 0)
+    reported = frame.loc[frame["fit_status"].fillna("") != ""]
+    reported = reported.loc[reported["fit_origin"] >= 0]
+    if reported.empty:
+        return (0, 0, 0)
+    # One row per scheduled fit. `first` rather than a uniqueness assert: a
+    # malformed fragment must not take a manifest down.
+    per_fit = reported.groupby("fit_origin", sort=True)["fit_status"].first()
+    statuses = [str(v) for v in per_fit]
+    return (
+        len(statuses),
+        sum(FitDiagnostics.is_fallback(v) for v in statuses),
+        sum(FitDiagnostics.is_nonconverged(v) for v in statuses),
+    )
+
+
 def _outcome(
     task: _CellTask,
     *,
@@ -583,10 +674,12 @@ def _outcome(
     config_hash: str | None,
     n_rows: int,
     n_missing: int,
+    fits: tuple[int, int, int],
     elapsed: float,
     error: str | None,
 ) -> CellOutcome:
     cell = task.cell
+    n_fits, n_fallback, n_nonconverged = fits
     return CellOutcome(
         index=task.index,
         asset=cell.asset,
@@ -598,6 +691,9 @@ def _outcome(
         config_hash=config_hash,
         n_rows=n_rows,
         n_missing=n_missing,
+        n_fits=n_fits,
+        n_fits_fallback=n_fallback,
+        n_fits_nonconverged=n_nonconverged,
         wall_clock_s=elapsed,
         error=error,
     )
@@ -707,7 +803,18 @@ def run_grid(
                 on_cell(outcome)
             outcomes.append(outcome)
 
-    manifest = RunManifest(cells=tuple(sorted(outcomes, key=lambda o: o.index)))
+    manifest = RunManifest(
+        cells=tuple(sorted(outcomes, key=lambda o: o.index)),
+        environment=environment_report(),
+    )
+    if manifest.n_fits_fallback:
+        logger.warning(
+            "runner: %d of %d scheduled fits ran a fallback estimator, across %d cells "
+            "(D-032; see each cell's n_fits_fallback)",
+            manifest.n_fits_fallback,
+            manifest.n_fits,
+            len(manifest.fallback_cells),
+        )
     if manifest_path is not None:
         manifest.write(manifest_path)
     return manifest

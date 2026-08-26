@@ -3,9 +3,10 @@
 Two jobs, both in service of CLAUDE.md rule 3 (determinism):
 
 1. :func:`config_hash` turns the full description of a run — model spec, data
-   *contents*, splitter parameters, scoring parameters, seed, package version
-   — into one stable SHA-256. Two runs share a hash if and only if they are
-   the same experiment.
+   *contents*, splitter parameters, scoring parameters, seed, package version,
+   and the machine settings measured to move a number (D-032) — into one
+   stable SHA-256. Two runs share a hash if and only if they are the same
+   experiment.
 2. :class:`ResultsStore` persists scored rows keyed by that hash, so a run
    that has already been done is never redone, and so results computed on
    different execution backends merge without coordination (D-011).
@@ -34,6 +35,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from volbench.determinism import environment_spec
 from volbench.splitter import RollingOriginSplitter
 
 __all__ = [
@@ -173,6 +175,7 @@ def build_config(
     scoring: Mapping[str, Any] | None = None,
     version: str | None = None,
     protocol: Mapping[str, Any] | None = None,
+    environment: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the config dict that :func:`config_hash` consumes.
 
@@ -186,6 +189,20 @@ def build_config(
     non-empty: the caller passes it exactly when it binds, so a setting that
     cannot affect a run does not alter that run's identity, and every config
     hashed before the key existed keeps its hash.
+
+    ``environment`` is what the *machine* contributes (D-032) and is the one
+    block recorded **unconditionally**, which is the opposite of the rule
+    above and deliberate. Its absence was the defect: the BLAS thread count
+    moves ``arch``'s optimizer between local optima but moves no content
+    digest, so a 32-thread fragment and a 1-thread fragment of one cell shared
+    a hash and the store served either for the other. A setting that changes a
+    number always binds; there is no configuration under which it does not.
+    Defaults to :func:`~volbench.determinism.environment_spec` and is
+    overridable so a test can pin a hash without pinning the test host.
+
+    Every config hashed before this key existed therefore *changes*. That is
+    intended and is why 0.5.0 → 0.6.0: the old hashes named an experiment
+    whose description was incomplete.
     """
     config: dict[str, Any] = {
         "model": {"name": model_name, "spec": dict(model_spec)},
@@ -194,6 +211,7 @@ def build_config(
         "scoring": dict(scoring or {}),
         "seed": int(seed),
         "package_version": version if version is not None else package_version(),
+        "environment": dict(environment if environment is not None else environment_spec()),
     }
     if protocol:
         config["protocol"] = dict(protocol)

@@ -1,6 +1,6 @@
 # 04 · volbench API design
 
-> Status: **AS-BUILT at the runner build (v0.5.0-runner)**. This
+> Status: **AS-BUILT at the determinism build (v0.6.0-determinism)**. This
 > file described the plan until the three Phase 1 streams landed; it now
 > describes what exists, with every place the build diverged from the plan
 > called out inline under **Diverged:**. Updated at M1, at M2
@@ -13,7 +13,13 @@
 > panel list) and closed the ES gap, and on `feat/p2-runner`
 > (docs/P3_RUNNER.md), which built the grid runner, the local multiprocessing
 > executor and the economic-value metric, and closed two model-protocol open
-> questions (D-030 HAR's retransformation, D-031 PatchTST's device class).
+> questions (D-030 HAR's retransformation, D-031 PatchTST's device class),
+> and on `feat/p3-determinism` (docs/P3_DETERMINISM.md), which closed the
+> BLAS-thread-count reproducibility defect `feat/p2-runner` had reported
+> open — pinning the thread count, putting it in every config hash, bounding
+> the Student-t `nu` that made GARCH sensitive to it in the first place, and
+> making a fit's fallback/convergence state visible per row and per cell
+> (D-032).
 > The planning-folder copy is behind this one and needs re-syncing from here,
 > not the other way round.
 
@@ -252,6 +258,26 @@
   disagree about whether a bad origin should be survivable. Every Phase-2
   model sides with HAR (raise; the evaluator records the origin as a
   `fit_error@` row).
+
+  **Since `feat/p3-determinism` (D-032)** that fallback is no longer silent:
+  `FittedGARCH.fit_diagnostics()` reports it, `run_backtest` records it per
+  row in `fit_status`, and `run_grid` counts it per cell. Measured where it
+  matters: **0 of 1410** scheduled fits on three real panel assets, and 0 of
+  200 on the toy fixture — the fallback is a guard that does not fire, not a
+  hidden estimator swap, which is what the diagnosis had to establish before
+  the real cause could be found.
+
+  **Also D-032:** the Student-t degrees of freedom are bounded to
+  `NU_BOUNDS = (2.1, 50)` and SLSQP runs at `FIT_TOL = 1e-10`, both in
+  `spec()` and therefore in the hash. `arch`'s own upper bound is 500, and a
+  500-observation window carries no information about tail thickness up there
+  — the likelihood is flat along `nu`, and that flat direction is what let a
+  last-ulp BLAS difference move the optimizer into a different local optimum.
+  On the Gaussian toy fixture the bound binds on every fit (correctly: the
+  true `nu` is infinite); on the real panel it binds on 18 of 705 GARCH-t fits
+  (2.6%) with `nu` interior at a median around 7, so estimable tail thickness
+  is untouched. A multi-start with best-likelihood selection was measured as
+  an alternative and rejected — it made the sensitivity worse.
 
 - **Classical log-RV models** (`models/sf.py`, `models/lgbm.py`, added on
   `feat/p2-models-classical`): `AutoETSRV` (statsforecast `AutoETS`, pinned
@@ -624,6 +650,19 @@ Settled after M1 report §4.3 (open at M1, implemented on
   `array_digest`, `normalize_frame`, `package_version`, `KEY_COLUMNS`,
   `REQUIRED_COLUMNS`.
 
+  **Added on `feat/p3-determinism` (D-032):** `build_config` records an
+  `environment` block — today one key, `blas_threads`, from
+  `volbench.determinism.thread_pin()`. It is written **unconditionally**,
+  which is the opposite of the `protocol` block's rule and deliberate: the
+  BLAS thread count moves `arch`'s optimizer between local optima while moving
+  no content digest, so before D-032 a 32-thread fragment and a 1-thread
+  fragment of one cell shared a hash and the store served either for the
+  other. A setting that changes a number always binds. The pin itself
+  (`OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`) is exported by the Makefile
+  and CI, so the sanctioned path records `1` on every machine and
+  cross-machine cache sharing survives; it is the *unpinned* path that stops
+  sharing, which is the point.
+
 - **`Executor` / `SerialExecutor` / `ProcessExecutor`** (`execute.py`) — the
   execution seam. A cell is one `(asset, model, splitter, seed)` unit; within a
   cell, `run_backtest` further splits origins into *refit blocks* and maps
@@ -652,6 +691,15 @@ Settled after M1 report §4.3 (open at M1, implemented on
     parent's (`kernel_signature()`) and refuses the task if they differ. A
     mismatch is then a loud error naming both signatures rather than a
     silently orphaned fragment.
+  - **The BLAS thread count travels with it too (D-032).** Same two
+    mechanisms as the kernel family: `OMP_NUM_THREADS` and
+    `OPENBLAS_NUM_THREADS` are propagated verbatim (including "unset") and
+    every worker checks its resolved count against the parent's. It needs the
+    guard *more* than the kernel family does — the thread count moves no
+    content digest, so a worker at a different count produced numbers that
+    were filed under the parent's hash rather than orphaned. Both pins and
+    both checks now live in `volbench.determinism`, which
+    `execute.py` re-exports `kernel_signature`/`KERNEL_PIN_VAR` from.
   - **Rule 1 ("no nesting") is enforced.** `map` raises inside a worker
     process, because a pool-backed executor nested in a bounded pool deadlocks
     — and a deadlock is indistinguishable from a slow grid until someone kills
@@ -719,8 +767,23 @@ Settled after M1 report §4.3 (open at M1, implemented on
 
   **`RunManifest`** is a tuple of `CellOutcome`s in grid order — index, asset,
   model, horizon, arm, lane, status, `config_hash`, `n_rows`, `n_missing`,
-  `wall_clock_s`, `error` — with `to_frame()`, `as_json()` and `write(path)`
-  (temp file + `os.replace`, the store's discipline). It is a *record*, never
+  `n_fits`, `n_fits_fallback`, `n_fits_nonconverged`, `wall_clock_s`, `error`
+  — plus an `environment` block, with `to_frame()`, `as_json()` and
+  `write(path)` (temp file + `os.replace`, the store's discipline).
+
+  The three fit counts and `environment` are D-032. The counts are per
+  *scheduled fit*, not per row: a block of 21 origins rests on one fit and a
+  cell at horizon 5 writes five rows per origin, so a row-weighted rate would
+  really be a statistic about the refit cadence. `CellOutcome.fallback_rate`
+  is `nan`, never `0.0`, when nothing reported a status — "no fit fell back"
+  and "no fit said" are different claims and only one is evidence. A cached
+  cell is counted from the fragment it read, so resuming a grid does not reset
+  its fallback rate to zero. `environment` says more than the hash does
+  (which carries only `blas_threads`): the BLAS build and version, the kernel
+  signature, the pins as they stood and the observed thread pools — what a
+  reader diagnosing two runs that disagree actually needs.
+
+  It is a *record*, never
   an input: resuming reads the store, so a stale manifest cannot corrupt a
   grid. Two manifests of one grid differ only in their timings; there is
   deliberately no reader. `read_grid_results(store, manifest)` returns this
@@ -834,10 +897,15 @@ since `feat/p2-runner` the grid runner (`run_grid`, `GridSpec`,
 `ModelConfig`, `ProtocolArm`, `AssetData`, `DataSource`,
 `MappingDataSource`, `CellOutcome`, `RunManifest`, `read_grid_results`) and
 economic value (`volatility_target_backtest`, `VolTargetBacktest`,
-`periods_per_year_for`).
+`periods_per_year_for`). `volbench.models.base` additionally publishes
+`FitDiagnostics` and `SupportsFitDiagnostics` (D-032), the optional protocol
+by which a fitted model says how its fit went.
 
-Kept out of the root and reachable at their modules: `volbench.execute`'s
-`kernel_signature`/`KERNEL_PIN_VAR` (a D-026 diagnostic, not vocabulary),
+Kept out of the root and reachable at their modules: `volbench.determinism`
+entire (`kernel_signature`, `thread_pin`, `environment_spec`,
+`environment_report`, `KERNEL_PIN_VAR`, `THREAD_PIN_VARS` — D-026/D-032
+machinery, not vocabulary; `execute.py` re-exports the first two names it
+already published),
 `volbench.runner`'s `Cell`/`Lane`/`CellStatus`/`LANE_ORDER` (grid internals
 a caller describes a grid without), and `volbench.models.patchtst`'s
 `resolve_device_class`.
@@ -879,21 +947,23 @@ the `package_version()` that enters every config hash.
    under an RNG: PatchTST's `device_class` is hashed (D-031), so a CPU and a
    GPU fragment are two cells rather than one hash with two answers.
 
-   **OPEN, found on `feat/p2-runner` and not fixed there** (docs/P3_RUNNER.md
-   §6): byte-identity of the **GARCH** cells is *also* a claim within one
-   **OpenBLAS thread count**. With `OPENBLAS_NUM_THREADS=1` against the
-   machine default, `garch11` and `garch11_t` forecasts move (max relative
-   9.2e-5 and 5.5e-1 respectively on the toy fixture); the other six models
-   are bit-identical. Threaded BLAS reorders a reduction by an ulp and arch's
-   SLSQP amplifies it into a different optimum. Two runs at the *same* thread
-   count are bit-identical, and serial and pooled runs agree exactly (they
-   share the parent's environment), so nothing in this repo is presently
-   wrong — but unlike D-026's case this moves **results without moving the
-   config hash**, so a store filled on a 32-thread box and topped up on a
-   2-core runner would hold two answers under one hash. The fix is the same
-   shape as D-026 — pin the thread count in the Makefile and CI — and it is a
-   protocol decision that moves the GARCH numbers, so it is reported rather
-   than taken as a side effect. See the open questions.
+   **And a claim within one BLAS thread count (D-032)**, closed on
+   `feat/p3-determinism` after `feat/p2-runner` reported it open
+   (docs/P3_RUNNER.md §7, docs/P3_DETERMINISM.md). Threaded OpenBLAS reorders
+   a reduction by an ulp and arch's SLSQP amplifies it into a *different local
+   optimum*: `garch11_t` moved by 5.5e-1 relative on the toy fixture and
+   `garch11` by 9.2e-5, the other six models bit-identical. Unlike D-026's
+   case this moved **results without moving the config hash**, so a store
+   filled on a 32-thread box and topped up on a 2-core runner held two answers
+   under one name. Three things close it: the pin
+   (`OMP_NUM_THREADS=1`/`OPENBLAS_NUM_THREADS=1` in the Makefile and CI, and
+   propagated into every worker), `blas_threads` in every config hash — so an
+   unpinned run now misses the cache instead of being served the wrong
+   fragment, exactly D-026's failure mode rather than the worse one — and the
+   `nu` bound at the source, which takes `garch11_t`'s residual sensitivity to
+   2.9e-6, below `garch11`'s own. The determinism rule therefore reads: **same
+   seed, same code, same data, same kernel family, same BLAS thread count.**
+
 4. Scalers/feature transforms fit on train windows only, inside the splitter's
    contract.
 
@@ -982,18 +1052,39 @@ the guard, and keeps its own index assertion as a redundant belt.
       with invalid days. Documented everywhere it applies; what remains open
       is a presentation question — whether the paper reports those models'
       memory in calendar days or in observations.
-- [ ] **The OpenBLAS thread count changes GARCH's numbers** (found on
-      `feat/p2-runner`, docs/P3_RUNNER.md §6; measured, reproducible, and the
-      only model family affected of the eight). It moves results *without*
-      moving a config hash, which is a strictly worse failure mode than
-      D-026's — that one causes a cache miss, this one lets the store serve
-      one answer for another. Recommended: pin `OPENBLAS_NUM_THREADS` in the
-      Makefile and CI exactly as D-026 pins `NPY_DISABLE_CPU_FEATURES`, and
-      restate the determinism rule as "same seed, same code, same data, same
-      kernel family, **same BLAS thread count**". That moves every GARCH
-      number, so it is a protocol decision for the planning machine to number
-      and take, not an executor side effect — and it should be taken **before**
-      any grid freeze, for the same reason D-030 was.
+- [x] **The OpenBLAS thread count changes GARCH's numbers** (found on
+      `feat/p2-runner`, docs/P3_RUNNER.md §7) — **resolved on
+      `feat/p3-determinism` (D-032)**, and the diagnosis moved where the fix
+      had to go. The hypothesis on the table was that the 5.5e-1 was the EWMA
+      fallback firing on some origins under one thread count and not the
+      other; it is not — the fallback fired on **0 of 200** toy origins and
+      **0 of 1410** real panel fits at both thread counts, with
+      `convergence_flag == 0` on every one. The mechanism is that `nu` is
+      unidentified on a 500-observation window (estimated anywhere in
+      [109, 500]), the likelihood is flat along it, and SLSQP's wandering
+      there couples into (omega, alpha, beta) hard enough for a last-ulp BLAS
+      difference to land it in a different local optimum. Three things
+      shipped: the thread pin in the Makefile and CI, `blas_threads` in every
+      config hash (so an unpinned run misses the cache rather than being
+      served the wrong fragment), and `nu` bounded to (2.1, 50) with a tighter
+      SLSQP tolerance — which takes `garch11_t`'s thread sensitivity from
+      5.5e-1 to **2.9e-6**, below `garch11`'s own 9.2e-5. Still open, and now
+      the only open half: **the estimator's conditioning is a property of the
+      window, not of this project.** The pin makes the answer reproducible; it
+      does not make the likelihood surface less multimodal, and a different
+      BLAS build or scipy version can still reshuffle which optimum is found
+      on the handful of origins where two are nearly tied. What bounds that
+      risk today is the measurement above (2.9e-6 max relative, no optimum
+      switching) and the `fit_status` column, which makes a fit that did not
+      go cleanly visible instead of silent.
+- [ ] **Fallback and convergence are visible but not yet actionable.** D-032
+      records `fit_status` per row and `n_fits_fallback` per cell, so a cell
+      that ran a degraded estimator can be *seen*. Nothing yet decides what a
+      study does about one — whether a cell above some fallback rate is
+      reported with a caveat, excluded, or refitted under a different
+      configuration. That is a protocol question for the grid freeze, and it
+      needs a rate measured on the full panel rather than on the three assets
+      §5 of docs/P3_DETERMINISM.md uses.
 - [ ] **Concurrent lanes.** The runner runs the CPU lane to completion before
       the GPU lane, because the CPU lane forks and forking after a CUDA
       context exists is undefined behaviour. The GPU therefore idles while the

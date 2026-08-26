@@ -68,16 +68,28 @@ N_ORIGINS = 200
 #: the shared smearing retransformation moved **HAR's numbers as well** — its
 #: model name is now ``har_rv-smearing`` and its QLIKE 0.1823 -> 0.1806. The
 #: other seven cells' numbers are byte-identical to the 0.4.0 run; only their
-#: hashes moved, with the version.
+#: hashes moved, with the version. And at 0.6.0 (D-032), where three things
+#: moved them: the version again; the new ``environment`` block, which puts
+#: the BLAS thread count in every hash; and — for the two GARCH cells alone —
+#: ``fit_tol``, plus ``nu_bounds`` on ``garch11_t``, which are now
+#: hyperparameters in ``spec()``. **The two GARCH cells' numbers moved too**,
+#: which the other six's did not: bounding nu to (2.1, 50) is a different
+#: estimator, and it is what took ``garch11_t``'s BLAS-thread sensitivity from
+#: 5.5e-1 to 2.9e-6 (docs/P3_DETERMINISM.md §4).
+#:
+#: These identities are only defined under the thread pin — hence
+#: ``@pytest.mark.pinned_identity``, which skips them on an unpinned shell
+#: rather than reporting a machine's different-but-correct answer as a
+#: regression.
 PINNED_CONFIG_HASHES = {
-    "autoarima": "61a64971e7367ed584c56f15fce5ae1771e62d380fb88e85d0704f3565322e26",
-    "autoets": "8b9eb9fc14bd5992bd7a582faba1c9e532cb833ca99e36c89733a21d5c4f8280",
-    "ewma": "5cd9e3e15f04846dcbdfd7aa44b339334f96488895bb4972b85e507a823f73c7",
-    "garch11": "c708c06e7041d25ff8aad8d97984589cd8e4e7a47b6acfb4e9df12dbd44b991b",
-    "garch11_t": "7a4f43585f282c67f9d34e8c43b370e00645a1cceb7ad17747d21984944de64f",
-    "har": "bf3283ac1dad66a627bd3d6359266d5dfac046a501387061fd1df2ad6c80c947",
-    "lgbm": "5628598dd6970a8ffd8a130ae87a519eec26d20f1f407955ec2a1dd262957933",
-    "naive": "da5fb0f61d3f3e70692996fc79ce39a37089099b5acd5543a68ce4cb0373901a",
+    "autoarima": "e859c63b865f4ba4dcea064dd109878988234affead5b24521d628cc608aecb9",
+    "autoets": "505fc821c85ae49fc16faadc5f87961bfe7b4ac7129caccbcc7355478a7c1c61",
+    "ewma": "228a809631262c4ce799c6f2e9f85edebfa7c691b804c70aec5c90b515545d89",
+    "garch11": "d5db8995df4c16e8faf3ae1cd75eea463a0f0bedee27a5df4c9aa184f5224464",
+    "garch11_t": "dd95b567c1eaddd78bfc01f910d4f61db2bdcef9b83b5832f18a0f4ea06f3075",
+    "har": "d12f6e460217bc592fb44dcc923fe30866d4223faaa80ab787a6da7ce5b1060b",
+    "lgbm": "adfdb5a13283167a45787ac2e6c438a7cc00ad673a04f982320b9a1d6c7ab701",
+    "naive": "e4dfb12b52b6ae5af584a37c9262d819ae9cade6edde4c5ea80182d43163a38c",
 }
 
 
@@ -125,10 +137,21 @@ class Counting:
 
 
 class NoUpdateFitted:
-    """A fitted model with the update capability hidden — a pre-M2 model."""
+    """A fitted model with the update capability hidden — a pre-M2 model.
+
+    *Only* ``update`` is hidden. Everything else — including
+    ``fit_diagnostics`` (D-032) — is forwarded, so the comparison this stands
+    in for stays a comparison of re-conditioning and not of whatever else the
+    wrapper happened not to implement.
+    """
 
     def __init__(self, inner: Any) -> None:
         self.inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        if name in ("update", "inner"):
+            raise AttributeError(name)
+        return getattr(self.inner, name)
 
     @property
     def name(self) -> str:
@@ -275,6 +298,7 @@ class TestEquivalenceAtRefitEveryOne:
     same parquet bytes. (The gate additionally checks the bytes against a
     fresh run of the pre-change code; see the commit message.)"""
 
+    @pytest.mark.pinned_identity
     def test_daily_and_none_are_byte_identical_and_keep_the_pinned_hashes(
         self, tmp_path: Path
     ) -> None:

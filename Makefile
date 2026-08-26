@@ -31,6 +31,26 @@ UV_RUN := uv run $(EXTRAS)
 # the difference on purpose.
 export NPY_DISABLE_CPU_FEATURES ?= X86_V4 AVX512_ICL AVX512_SPR
 
+# Pin the BLAS to one thread (D-032). Not a performance setting — a
+# correctness one. Threaded OpenBLAS reorders a reduction by an ulp and
+# arch's SLSQP turns that into a *different local optimum* of the GARCH
+# likelihood: measured at 5.5e-1 relative on garch11_t and 9.2e-5 on
+# garch11 (docs/P3_DETERMINISM.md §2). Unlike the kernel pin above, the
+# thread count moves no content digest, so before D-032 the two answers
+# shared one config hash. `blas_threads` is now hashed, so an unpinned run
+# misses the cache instead of being served the wrong fragment — and pinning
+# to 1 here is what keeps every machine on the same side of that split.
+#
+# Exported for the WHOLE target, not just the workers: a pool inherits the
+# parent environment, and pinning only the workers is exactly how a pooled
+# run stops reproducing the serial one.
+#
+# `?=` so a deliberate measurement can override it
+# (OPENBLAS_NUM_THREADS=8 make benchmark); the run then records 8 in every
+# config hash and lands in its own fragments rather than overwriting these.
+export OMP_NUM_THREADS ?= 1
+export OPENBLAS_NUM_THREADS ?= 1
+
 TOY_FIXTURE := src/volbench/benchmarks/data/toy_asset_daily.csv
 TOY_OUT     := data/toy_benchmark
 
