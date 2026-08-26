@@ -46,7 +46,8 @@ from volbench.benchmarks.toy import (
     run_toy_benchmark,
 )
 from volbench.dist import Distribution
-from volbench.evaluate import Recondition, run_backtest
+from volbench.evaluate import Recondition, SupportsUpdate, run_backtest
+from volbench.models.base import FitDiagnostics, SupportsFitDiagnostics
 from volbench.results import ResultsStore, build_config, canonical_repr, config_hash
 from volbench.splitter import RollingOriginSplitter
 
@@ -139,10 +140,12 @@ class Counting:
 class NoUpdateFitted:
     """A fitted model with the update capability hidden — a pre-M2 model.
 
-    *Only* ``update`` is hidden. Everything else — including
-    ``fit_diagnostics`` (D-032) — is forwarded, so the comparison this stands
-    in for stays a comparison of re-conditioning and not of whatever else the
-    wrapper happened not to implement.
+    *Only* ``update`` is hidden. Everything else is forwarded, so the
+    comparison this stands in for stays a comparison of re-conditioning and
+    not of whatever else the wrapper happened not to implement.
+
+    ``fit_diagnostics`` (D-032) is the one forwarded member that cannot be
+    left to ``__getattr__``: see :class:`NoUpdateFittedWithDiagnostics`.
     """
 
     def __init__(self, inner: Any) -> None:
@@ -165,6 +168,29 @@ class NoUpdateFitted:
         return dist
 
 
+class NoUpdateFittedWithDiagnostics(NoUpdateFitted):
+    """The same stand-in, for an inner model that reports fit diagnostics.
+
+    ``fit_diagnostics`` is declared on the class rather than reached through
+    ``NoUpdateFitted.__getattr__`` because from Python 3.12 a
+    ``runtime_checkable`` protocol's ``isinstance`` resolves its members with
+    ``inspect.getattr_static`` (CPython gh-102433), which does not consult
+    ``__getattr__``. Dynamic forwarding satisfies ``hasattr`` but leaves the
+    stand-in invisible to ``SupportsFitDiagnostics`` on 3.12+, which is what
+    it was measured doing: ``evaluate._fit_status`` recorded ``""`` on every
+    row and ``TestFrozenArm`` compared a real status column against a blank
+    one.
+
+    Which class :class:`NoUpdate` uses is decided per fit, so a stand-in for a
+    model that reports nothing keeps reporting nothing rather than acquiring a
+    capability its inner model never had.
+    """
+
+    def fit_diagnostics(self) -> FitDiagnostics:
+        diagnostics: FitDiagnostics = self.inner.fit_diagnostics()
+        return diagnostics
+
+
 class NoUpdate:
     def __init__(self, inner: Any) -> None:
         self.inner = inner
@@ -177,7 +203,10 @@ class NoUpdate:
         return dict(self.inner.spec())
 
     def fit(self, train: NDArray[np.float64], **ctx: Any) -> NoUpdateFitted:
-        return NoUpdateFitted(self.inner.fit(train))
+        fitted = self.inner.fit(train)
+        if isinstance(fitted, SupportsFitDiagnostics):
+            return NoUpdateFittedWithDiagnostics(fitted)
+        return NoUpdateFitted(fitted)
 
 
 # --------------------------------------------------------------------------
@@ -362,6 +391,46 @@ class TestFrozenArm:
             daily.loc[at_refits, "forecast_var"].to_numpy(),
             frozen.loc[at_refits, "forecast_var"].to_numpy(),
         )
+
+
+class TestTheStandInHidesOnlyWhatItClaimsTo:
+    """``NoUpdate`` is a control only if it hides ``update`` and nothing else.
+
+    Regression for a defect that reached ``main``: ``NoUpdateFitted`` forwarded
+    ``fit_diagnostics`` through ``__getattr__`` alone, which ``hasattr``
+    accepts but the 3.12+ ``runtime_checkable`` ``isinstance`` does not
+    (CPython gh-102433 resolves protocol members with
+    ``inspect.getattr_static``). ``TestFrozenArm`` above then compared a real
+    ``fit_status`` column against a blank one and failed on 3.12/3.13 while
+    passing on 3.11. Asserting the capabilities themselves turns the next such
+    change into a named one-line failure rather than a 100%-different column,
+    and it costs one fit per model instead of two backtests.
+    """
+
+    @pytest.mark.parametrize("entry", models(), ids=lambda e: e.label)
+    def test_update_is_hidden_and_the_other_capabilities_are_not(
+        self, entry: ModelEntry
+    ) -> None:
+        toy = load_series()
+        source = toy.targets[SCORING_TARGET] if entry.fits_on_variance else toy.returns
+        train = source.to_numpy(dtype=np.float64)[:WINDOW]
+
+        inner = entry.factory().fit(train)
+        stand_in = NoUpdate(entry.factory()).fit(train)
+
+        # The one capability it exists to hide.
+        assert isinstance(inner, SupportsUpdate)
+        assert not isinstance(stand_in, SupportsUpdate)
+
+        # Every other one it claims to forward, by the same test the evaluator
+        # applies — `isinstance`, not `hasattr`.
+        assert isinstance(stand_in, SupportsFitDiagnostics) == isinstance(
+            inner, SupportsFitDiagnostics
+        )
+        if isinstance(inner, SupportsFitDiagnostics):
+            assert stand_in.fit_diagnostics().status() == inner.fit_diagnostics().status()
+        assert stand_in.name == inner.name
+        assert stand_in.spec() == inner.spec()
 
 
 # --------------------------------------------------------------------------
