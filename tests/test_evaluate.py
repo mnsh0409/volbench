@@ -34,6 +34,7 @@ from volbench.evaluate import (
     run_backtest,
 )
 from volbench.execute import SerialExecutor
+from volbench.models.base import FitDiagnostics
 from volbench.results import ResultsStore
 from volbench.splitter import RollingOriginSplitter
 
@@ -971,3 +972,88 @@ def test_a_series_too_short_for_the_splitter_is_rejected_by_the_splitter() -> No
     returns, proxy = simulated_panel(n=250)
     with pytest.raises(ValueError, match="too short"):
         backtest(OracleNormal(SIGMA), returns, proxy, make_splitter())
+
+
+# --------------------------------------------------------------------------
+# D-032: the results say how each fit went
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Reporting:
+    """An oracle that also reports a fit status — the optional protocol."""
+
+    status: FitDiagnostics
+
+    @property
+    def name(self) -> str:
+        return "reporting"
+
+    def spec(self) -> dict[str, Any]:
+        return {"kind": "reporting"}
+
+    def fit(self, train: NDArray[np.float64], **ctx: Any) -> Reporting:
+        return self
+
+    def fit_diagnostics(self) -> FitDiagnostics:
+        return self.status
+
+    def predict(self, h: int) -> Distribution:
+        return Normal(mu=0.0, sigma=SIGMA)
+
+
+class TestFitStatusColumn:
+    def test_a_model_that_reports_nothing_leaves_the_column_empty(self) -> None:
+        """Most adapters estimate nothing that can fail to converge. An empty
+        value is "did not say", never "said it was fine"."""
+        returns, proxy = simulated_panel(n=400)
+        frame = backtest(OracleNormal(SIGMA), returns, proxy, make_splitter())
+        assert (frame["fit_status"] == "").all()
+        # Pinned to str like `missing_reason`, so an unreported fit is the
+        # empty string and never NaN — a NaN would be counted as neither
+        # "fell back" nor "did not say".
+        assert frame["fit_status"].dtype == frame["missing_reason"].dtype
+        assert frame["fit_status"].notna().all()
+
+    def test_a_reported_status_lands_on_every_row_of_its_block(self) -> None:
+        """It describes the fit at ``fit_origin``, not the origin: ``update``
+        re-conditions at fixed parameters and runs no optimizer, so every origin
+        in a block rests on the same fit and reports the same status."""
+        returns, proxy = simulated_panel(n=400)
+        model = Reporting(FitDiagnostics(converged=False, fallback="ewma", detail="flag=9"))
+        frame = backtest(model, returns, proxy, make_splitter(refit_every=10))
+        assert (frame["fit_status"] == "fallback=ewma|flag=9").all()
+        per_fit = frame.groupby("fit_origin")["fit_status"].nunique()
+        assert (per_fit == 1).all()
+
+    def test_a_row_with_no_fit_behind_it_reports_nothing(self) -> None:
+        """``fit_origin == -1`` rows have no fit to describe, and a status
+        invented for them would be counted as a converged one."""
+        returns, proxy = simulated_panel(n=400)
+        frame = backtest(ExplodingModel(), returns, proxy, make_splitter())
+        assert (frame["fit_origin"] == -1).all()
+        assert (frame["fit_status"] == "").all()
+
+    def test_a_diagnostic_that_raises_never_costs_a_scored_row(self) -> None:
+        """An observation of a run must not turn a scored origin into a missing
+        one — the same rule the evaluator applies to everything else it reports."""
+
+        class Hostile(Reporting):
+            def fit_diagnostics(self) -> FitDiagnostics:
+                raise RuntimeError("diagnostics are broken")
+
+        returns, proxy = simulated_panel(n=400)
+        frame = backtest(Hostile(FitDiagnostics(converged=True)), returns, proxy, make_splitter())
+        assert (frame["fit_status"] == "").all()
+        assert (frame["missing_reason"] == "").all()
+        assert frame["crps"].notna().all()
+
+    def test_the_column_is_not_in_the_config_hash(self) -> None:
+        """Observing a fit must not change which cell it belongs to."""
+        returns, proxy = simulated_panel(n=400)
+        quiet = backtest(OracleNormal(SIGMA), returns, proxy, make_splitter())
+        loud = backtest(
+            Reporting(FitDiagnostics(converged=True)), returns, proxy, make_splitter()
+        )
+        assert "fit_status" not in str(quiet.attrs["config"])
+        assert "fit_status" not in str(loud.attrs["config"])

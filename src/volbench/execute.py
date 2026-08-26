@@ -64,6 +64,14 @@ claim.
   failure is a loud error naming both signatures rather than a silently
   orphaned fragment.
 
+The BLAS thread count (D-032) rides the same two mechanisms. It is pinned to
+1 by the Makefile, by CI and by :data:`volbench.determinism.THREAD_PIN_VARS`
+in every worker, propagated verbatim like the kernel pin, and checked per
+worker the same way. It needs the guard *more* than the kernel family does:
+the thread count moves no content digest, so before D-032 a worker running
+at a different count produced numbers that were filed under the parent's
+hash rather than orphaned — a wrong answer, not a wasted one.
+
 Under a plain ``fork`` there is a third, stronger guarantee — the worker
 inherits the parent's already-initialized numpy, i.e. the dispatch decision
 itself rather than the environment that produced it — which is why ``fork`` is
@@ -104,7 +112,6 @@ model's name here.
 
 from __future__ import annotations
 
-import hashlib
 import multiprocessing
 import os
 import sys
@@ -112,9 +119,19 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, Final, Protocol, TypeVar, runtime_checkable
 
+from volbench.determinism import (
+    KERNEL_PIN_VAR,
+    THREAD_PIN_VARS,
+    determinism_env,
+    kernel_signature,
+    thread_pin,
+)
+
 __all__ = [
     "DEFAULT_START_METHOD",
     "FORK_UNSAFE_MODULES",
+    "KERNEL_PIN_VAR",
+    "THREAD_PIN_VARS",
     "Executor",
     "ProcessExecutor",
     "SerialExecutor",
@@ -123,9 +140,6 @@ __all__ = [
 
 T = TypeVar("T")
 R = TypeVar("R")
-
-#: The environment variable D-026 pins the numpy SIMD kernel family with.
-KERNEL_PIN_VAR: Final = "NPY_DISABLE_CPU_FEATURES"
 
 #: Backends whose native runtime makes a *plain* ``fork`` unsafe once this
 #: process has used them (module docstring). Membership in ``sys.modules`` is a
@@ -169,46 +183,6 @@ class SerialExecutor:
 
 
 # --------------------------------------------------------------------------
-# numpy kernel family (D-026)
-# --------------------------------------------------------------------------
-
-
-def kernel_signature() -> str:
-    """Digest of the numpy SIMD dispatch targets *enabled in this process*.
-
-    Two processes sharing this string compute ``log``/``exp`` with the same
-    kernels and therefore agree bit for bit; two that do not can disagree in
-    the last ulp, which moves every content digest downstream (D-026).
-
-    ``numpy._core._multiarray_umath`` is private, so an unreadable or
-    restructured build degrades to a signature over the pin variable itself
-    rather than raising: this is a guard, and a guard that cannot run must not
-    take the run down with it.
-    """
-    try:
-        from numpy._core._multiarray_umath import (  # type: ignore[import-not-found]
-            __cpu_baseline__,
-            __cpu_dispatch__,
-            __cpu_features__,
-        )
-    except Exception:  # pragma: no cover - numpy internals moved or unreadable
-        return "unknown:" + os.environ.get(KERNEL_PIN_VAR, "")
-    enabled = [target for target in sorted(__cpu_dispatch__) if __cpu_features__.get(target)]
-    canonical = "baseline=" + ",".join(sorted(__cpu_baseline__)) + ";dispatch=" + ",".join(enabled)
-    return hashlib.sha256(canonical.encode("ascii")).hexdigest()[:16]
-
-
-def _kernel_env() -> dict[str, str | None]:
-    """The parent's kernel pin, as something a worker can reapply verbatim.
-
-    ``None`` means *unset*, and a worker sets it unset — inventing a value the
-    parent did not have would make the pool disagree with a serial run in the
-    same shell, which is precisely the failure this exists to prevent.
-    """
-    return {KERNEL_PIN_VAR: os.environ.get(KERNEL_PIN_VAR)}
-
-
-# --------------------------------------------------------------------------
 # process pool
 # --------------------------------------------------------------------------
 
@@ -217,6 +191,7 @@ def _kernel_env() -> dict[str, str | None]:
 #: family once per process rather than once per task.
 _IN_WORKER = False
 _CHECKED_KERNEL: str | None = None
+_CHECKED_THREADS: int | None = None
 
 
 def _init_worker(env: dict[str, str | None]) -> None:
@@ -260,16 +235,17 @@ def _require_importable_main(start_method: str) -> None:
 
 @dataclass(frozen=True)
 class _Payload:
-    """One unit of work plus the parent's kernel signature to check against."""
+    """One unit of work plus the parent's machine signature to check against."""
 
     fn: Callable[[Any], Any]
     item: Any
     kernel: str | None
+    threads: int | None
 
 
 def _apply(payload: _Payload) -> Any:
-    """Worker-side entry point: verify the kernel family once, then do the work."""
-    global _CHECKED_KERNEL
+    """Worker-side entry point: verify the machine once, then do the work."""
+    global _CHECKED_KERNEL, _CHECKED_THREADS
     if payload.kernel is not None and payload.kernel != _CHECKED_KERNEL:
         local = kernel_signature()
         if local != payload.kernel:
@@ -280,6 +256,21 @@ def _apply(payload: _Payload) -> Any:
                 f"{KERNEL_PIN_VAR}={os.environ.get(KERNEL_PIN_VAR)!r} in this worker."
             )
         _CHECKED_KERNEL = local
+    if payload.threads is not None and payload.threads != _CHECKED_THREADS:
+        local_threads = thread_pin()
+        if local_threads != payload.threads:
+            raise RuntimeError(
+                "worker BLAS thread count differs from the parent's "
+                f"({local_threads} != {payload.threads}). The parent has already hashed "
+                f"its own count into every config this run writes (D-032), so results "
+                f"computed here would be filed under a hash that describes a different "
+                f"machine. Pins in this worker: "
+                + ", ".join(
+                    f"{var}={os.environ.get(var)!r}" for var in THREAD_PIN_VARS
+                )
+                + "."
+            )
+        _CHECKED_THREADS = local_threads
     return payload.fn(payload.item)
 
 
@@ -305,9 +296,13 @@ class ProcessExecutor:
         ``"spawn"`` also works; every method other than ``fork`` relies on the
         environment propagation and the per-worker kernel check for D-026.
     check_kernel_family:
-        Verify each worker's enabled numpy dispatch targets against the
-        parent's before it runs anything (D-026). On by default; turning it off
-        is only for measuring the difference on purpose.
+        Verify each worker's machine settings against the parent's before it
+        runs anything: the enabled numpy dispatch targets (D-026) and the
+        resolved BLAS thread count (D-032). Both are propagated to the worker
+        first, so the check fires only when something outside this module
+        overrode one of them. On by default; turning it off is only for
+        measuring the difference on purpose. (The name predates the thread
+        check and is kept because it is a public field.)
 
     Not a GPU scheduler. Routing GPU-bound cells away from the fan-out is
     :mod:`volbench.runner`'s job, from explicit configuration (D-027).
@@ -364,13 +359,17 @@ class ProcessExecutor:
         from concurrent.futures import ProcessPoolExecutor
 
         kernel = kernel_signature() if self.check_kernel_family else None
-        payloads = [_Payload(fn=fn, item=item, kernel=kernel) for item in materialized]
+        threads = thread_pin() if self.check_kernel_family else None
+        payloads = [
+            _Payload(fn=fn, item=item, kernel=kernel, threads=threads)
+            for item in materialized
+        ]
         context = multiprocessing.get_context(self.start_method)
         with ProcessPoolExecutor(
             max_workers=self.n_workers,
             mp_context=context,
             initializer=_init_worker,
-            initargs=(_kernel_env(),),
+            initargs=(determinism_env(),),
         ) as pool:
             # `.map` yields in item order and re-raises the first exception, so
             # the Executor contract (one result per item, in item order, faults

@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from volbench.determinism import thread_pin
 from volbench.execute import (
     DEFAULT_START_METHOD,
     KERNEL_PIN_VAR,
@@ -260,17 +261,19 @@ class TestKernelFamily:
         digest nobody can reproduce (D-026)."""
         from volbench.execute import _apply, _Payload
 
-        honest = _Payload(fn=double, item=21, kernel=kernel_signature())
+        honest = _Payload(fn=double, item=21, kernel=kernel_signature(), threads=thread_pin())
         assert _apply(honest) == 42
 
-        impostor = _Payload(fn=double, item=21, kernel="0123456789abcdef")
+        impostor = _Payload(
+            fn=double, item=21, kernel="0123456789abcdef", threads=thread_pin()
+        )
         with pytest.raises(RuntimeError, match="kernel family"):
             _apply(impostor)
 
     def test_the_check_can_be_turned_off_for_a_deliberate_measurement(self) -> None:
         from volbench.execute import _apply, _Payload
 
-        assert _apply(_Payload(fn=double, item=3, kernel=None)) == 6
+        assert _apply(_Payload(fn=double, item=3, kernel=None, threads=None)) == 6
         assert ProcessExecutor(workers=2, check_kernel_family=False).map(double, [4]) == [8]
 
 

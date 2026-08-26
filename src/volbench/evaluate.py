@@ -58,7 +58,11 @@ from volbench.compaction import FitSeries
 from volbench.dist import Distribution, Empirical, QuantileGrid
 from volbench.execute import Executor, SerialExecutor
 from volbench.metrics import qlike
-from volbench.models.base import FittedModel, ForecastModel
+from volbench.models.base import (
+    FittedModel,
+    ForecastModel,
+    SupportsFitDiagnostics,
+)
 from volbench.results import (
     ResultsStore,
     array_digest,
@@ -316,6 +320,7 @@ def _result_dtypes(levels: tuple[float, ...]) -> dict[str, str]:
         "log_score": "float64",
         "qlike": "float64",
         "missing_reason": "str",
+        "fit_status": "str",  # how the fit at `fit_origin` went; "" if unreported
     }
     for level in levels:
         tag = _level_tag(level)
@@ -453,6 +458,23 @@ def _forecast_and_score(
         return _failure_scores(task.levels, reason)
 
 
+def _fit_status(fitted: FittedModel) -> str:
+    """How ``fitted``'s scheduled fit went, as the results column records it (D-032).
+
+    ``""`` for a model that reports nothing — most of them estimate nothing
+    that can fail to converge. A model whose ``fit_diagnostics`` itself raises
+    also gets ``""``: a diagnostic is an observation of a run, and an
+    observation that fails must not turn a scored origin into a missing one.
+    """
+    if not isinstance(fitted, SupportsFitDiagnostics):
+        return ""
+    try:
+        return fitted.fit_diagnostics().status()
+    except Exception:  # pragma: no cover - a diagnostic must never cost a row
+        logger.warning("%s: fit_diagnostics raised; recording no status", type(fitted).__name__)
+        return ""
+
+
 def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
     """Fit once, then forecast and score every origin in the block.
 
@@ -471,6 +493,13 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
 
     Rows without a fitted model carry ``fit_origin = conditioned_through =
     -1``: there is no fit to point at, and those columns are pinned int64.
+    ``fit_status`` (D-032) describes the fit at ``fit_origin`` and is empty on
+    those rows for the same reason — and empty again for the models that
+    estimate nothing, so an empty value never reads as a clean fit. It is a
+    property of the *scheduled* fit, not of the origin: ``update``
+    re-conditions at fixed parameters and runs no optimizer, so every origin in
+    a block reports the status of the fit it rests on. That is what makes
+    "this cell fell back on N of its M fits" answerable from the stored rows.
 
     Materializing the window is part of the fit, so it fails the same way. On
     a compacted series (D-018) the earliest origins may not have ``window``
@@ -487,6 +516,7 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
     fitted: FittedModel | None = None
     fit_origin = -1
     conditioned_through = -1
+    fit_status = ""
     block_failure: str | None = None  # set while the block's scheduled fit is missing
     rows: list[dict[str, Any]] = []
 
@@ -498,11 +528,13 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
             except Exception as exc:
                 fitted = None
                 fit_origin = conditioned_through = -1
+                fit_status = ""
                 block_failure = _exception_reason("fit_error", exc, origin=origin.origin)
                 _log_failure(task.model_name, task.asset, origin.origin, block_failure, exc)
             else:
                 block_failure = None
                 fit_origin = conditioned_through = origin.origin
+                fit_status = _fit_status(fitted)
             origin_failure = block_failure
         elif block_failure is not None:
             # The block's scheduled fit failed: nothing to hold or update, and
@@ -536,6 +568,7 @@ def _run_block(task: _BlockTask) -> list[dict[str, Any]]:
                 "target_index": target,
                 "fit_origin": fit_origin,
                 "conditioned_through": conditioned_through,
+                "fit_status": fit_status,
                 "refit": bool(origin.refit),
                 "seed": task.seed,
                 "proxy_name": task.proxy_name,

@@ -32,9 +32,11 @@ import pandas as pd
 import pytest
 from numpy.typing import NDArray
 
+from volbench.determinism import thread_pin
 from volbench.dist import Distribution, Normal
 from volbench.execute import Executor, ProcessExecutor, SerialExecutor
 from volbench.models import EWMA, HAR, NaiveVol
+from volbench.models.base import FitDiagnostics
 from volbench.results import ResultsStore
 from volbench.runner import (
     LANE_ORDER,
@@ -87,6 +89,48 @@ class ExplodingModel:
 
     def __init__(self) -> None:
         raise RuntimeError("this model was never going to work")
+
+
+class FlakyFitted:
+    """A fit that reports a status: a fallback when its window ends on a down day.
+
+    Stands in for GARCH's real behaviour without GARCH's cost. The predicate is
+    a function of the *window*, not of a call counter, because the runner
+    constructs a fresh model per refit block — a counter would reset on every
+    block at ``refit_every=1`` and quietly never fall back at all.
+    """
+
+    def __init__(self, fell_back: bool) -> None:
+        self.fell_back = fell_back
+
+    @property
+    def name(self) -> str:
+        return "flaky"
+
+    def spec(self) -> dict[str, Any]:
+        return {"model": "flaky"}
+
+    def fit_diagnostics(self) -> FitDiagnostics:
+        if self.fell_back:
+            return FitDiagnostics(converged=False, fallback="ewma", detail="flag=9")
+        return FitDiagnostics(converged=True, detail="flag=0")
+
+    def predict(self, h: int) -> Distribution:
+        return Normal(mu=0.0, sigma=0.01)
+
+
+class Flaky:
+    """Fits :class:`FlakyFitted`. Picklable; holds no state between fits."""
+
+    @property
+    def name(self) -> str:
+        return "flaky"
+
+    def spec(self) -> dict[str, Any]:
+        return {"model": "flaky"}
+
+    def fit(self, train: NDArray[np.float64], **ctx: Any) -> FlakyFitted:
+        return FlakyFitted(bool(train[-1] < 0.0))
 
 
 class ConstantVol:
@@ -706,6 +750,9 @@ class TestManifest:
                 "config_hash",
                 "n_rows",
                 "n_missing",
+                "n_fits",
+                "n_fits_fallback",
+                "n_fits_nonconverged",
                 "wall_clock_s",
                 "error",
             }
@@ -858,3 +905,126 @@ def test_the_runner_only_ever_hands_a_cell_a_serial_executor() -> None:
     source = inspect.getsource(runner._run_cell)
     assert "executor=SerialExecutor()" in source
     assert isinstance(SerialExecutor(), Executor)
+
+
+# --------------------------------------------------------------------------
+# D-032: a fallback is counted, and the machine is on the record
+# --------------------------------------------------------------------------
+
+
+class TestFitCountsReachTheManifest:
+    """A cell that quietly ran a different estimator on some origins has to be
+    readable from the manifest, without opening a parquet."""
+
+    @pytest.fixture
+    def flaky_grid(self) -> GridSpec:
+        return GridSpec(
+            assets=("AAA",),
+            models=(ModelConfig("flaky", Flaky),),
+            arms=(ProtocolArm(label="h", window=WINDOW, refit_every=1),),
+        )
+
+    def test_it_counts_fallbacks_per_scheduled_fit(
+        self, flaky_grid: GridSpec, tmp_path: Path
+    ) -> None:
+        """Checked against the rows themselves rather than against a number
+        computed twice the same way: the claim is that the manifest count *is*
+        what the fragment says."""
+        data = {"AAA": make_asset("AAA", seed=1)}
+        store = ResultsStore(tmp_path)
+        manifest = run_grid(flaky_grid, data, store)
+        (cell,) = manifest.cells
+
+        assert cell.config_hash is not None
+        rows = store.read(cell.config_hash)
+        per_fit = rows.groupby("fit_origin")["fit_status"].first()
+        expected = int(per_fit.str.startswith("fallback=").sum())
+
+        assert cell.n_fits == N_ORIGINS == len(per_fit)
+        assert cell.n_fits_fallback == expected
+        assert 0 < expected < cell.n_fits, "the fixture must exercise both branches"
+        assert cell.n_fits_nonconverged == cell.n_fits_fallback
+        assert cell.fallback_rate == pytest.approx(expected / cell.n_fits)
+        assert manifest.fallback_cells == (cell,)
+
+    def test_a_model_that_reports_nothing_gets_a_nan_rate_not_a_zero(
+        self, tmp_path: Path
+    ) -> None:
+        """"No fit fell back" and "no fit said" are different claims, and only
+        one of them is evidence."""
+        grid = GridSpec(
+            assets=("AAA",),
+            models=(ModelConfig("const", ConstantVol),),
+            arms=(ProtocolArm(label="h", window=WINDOW, refit_every=1),),
+        )
+        manifest = run_grid(grid, {"AAA": make_asset("AAA", seed=1)}, ResultsStore(tmp_path))
+        (cell,) = manifest.cells
+        assert cell.n_fits == 0
+        assert np.isnan(cell.fallback_rate)
+        assert manifest.fallback_cells == ()
+
+    def test_the_counts_are_per_fit_not_per_row(self, tmp_path: Path) -> None:
+        """At ``refit_every=7`` one fit serves seven origins. Counting rows
+        would report a rate that is really a row-weighting of the refit
+        cadence."""
+        grid = GridSpec(
+            assets=("AAA",),
+            models=(ModelConfig("flaky", Flaky),),
+            arms=(ProtocolArm(label="h", window=WINDOW, refit_every=7, recondition="none"),),
+        )
+        manifest = run_grid(grid, {"AAA": make_asset("AAA", seed=1)}, ResultsStore(tmp_path))
+        (cell,) = manifest.cells
+        assert cell.n_rows == N_ORIGINS
+        assert cell.n_fits < cell.n_rows
+        assert cell.n_fits == len(range(0, N_ORIGINS, 7))
+
+    def test_a_resumed_cell_reports_the_same_counts_it_was_filled_with(
+        self, flaky_grid: GridSpec, tmp_path: Path
+    ) -> None:
+        """Counted from the fragment, so resuming a grid does not silently
+        reset its fallback rate to zero."""
+        data = {"AAA": make_asset("AAA", seed=1)}
+        store = ResultsStore(tmp_path)
+        first = run_grid(flaky_grid, data, store)
+        second = run_grid(flaky_grid, data, store)
+        assert second.cells[0].status == "cached"
+        assert second.cells[0].n_fits == first.cells[0].n_fits
+        assert second.cells[0].n_fits_fallback == first.cells[0].n_fits_fallback
+
+    def test_a_failed_cell_claims_no_fits(self, tmp_path: Path) -> None:
+        grid = GridSpec(
+            assets=("AAA",),
+            models=(ModelConfig("boom", ExplodingModel),),
+            arms=(ProtocolArm(label="h", window=WINDOW),),
+        )
+        manifest = run_grid(grid, {"AAA": make_asset("AAA", seed=1)}, ResultsStore(tmp_path))
+        (cell,) = manifest.cells
+        assert cell.status == "failed"
+        assert (cell.n_fits, cell.n_fits_fallback) == (0, 0)
+
+
+class TestManifestRecordsTheMachine:
+    def test_it_carries_the_thread_count_and_the_blas_build(
+        self, grid: GridSpec, data: dict[str, AssetData], tmp_path: Path
+    ) -> None:
+        """D-032: the hash carries only ``blas_threads``; the manifest says
+        more, because a reader diagnosing two runs that disagree needs the BLAS
+        build and the pins as they stood."""
+        manifest = run_grid(grid, data, ResultsStore(tmp_path))
+        environment = manifest.environment
+        assert environment["blas_threads"] == thread_pin()
+        assert "name" in environment["blas"]
+        assert "kernel_signature" in environment
+
+    def test_the_environment_survives_the_json_round_trip(
+        self, grid: GridSpec, data: dict[str, AssetData], tmp_path: Path
+    ) -> None:
+        path = tmp_path / "manifest.json"
+        run_grid(grid, data, ResultsStore(tmp_path / "store"), manifest_path=path)
+        written = json.loads(path.read_text(encoding="utf-8"))
+        assert written["environment"]["blas_threads"] == thread_pin()
+        assert written["n_fits"] >= 0
+
+    def test_a_hand_built_manifest_needs_no_environment(self) -> None:
+        """It is a report, not an input; a test must be able to build one."""
+        assert RunManifest(cells=()).environment == {}
