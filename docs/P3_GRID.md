@@ -11,7 +11,7 @@ the results review happens on the planning machine, off the stored fragments.
 | Date | 2026-08-26 |
 | Machine | i9-13900KF (32 threads), RTX 4090 24 GB, driver 535.309.01 |
 | Store | `data/grid_primary/store/` — 143 parquet fragments + 143 JSON sidecars, 100 MB |
-| Manifest | `data/grid_primary/manifest_primary.json` (64 KB) |
+| Manifest | `docs/P3_GRID_manifest.json` — committed copy of `data/grid_primary/manifest_primary.json` (64 KB) |
 | Driver | `data/grid_primary/run_grid.py` (gitignored with the results) |
 
 ---
@@ -216,7 +216,7 @@ driver, which is gitignored with the results it produced.
 | Fragments hash-consistent | **PASS** | each stored config re-hashed with `results.config_hash` reproduces the filename it is stored under; 143 distinct hashes, no two cells sharing one |
 | `blas_threads` in every hash | **PASS** | `environment.blas_threads == 1` in all 143 sidecars |
 | Resumable | **PASS** | a full re-run reports `attempted 143, computed 0, cached 143, failed 0`; all 143 fragments byte-identical **and unrewritten** (mtimes unchanged) |
-| Repo clean | **PASS** | only this document and the manifest are committed; `/data/` is gitignored |
+| Repo clean | **PASS** | only this document and the manifest are committed, and the manifest as `docs/P3_GRID_manifest.json` — **not** under `data/`, which `tests/test_licensing_guard.py::TestNoDataIsTracked` forbids absolutely (it asks `git ls-files -- data/` and requires the answer to be empty). The manifest carries no series values, only cell identities, counts and timings |
 
 ## 6. Leakage audit of the new surface
 
