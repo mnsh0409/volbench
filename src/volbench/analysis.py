@@ -678,9 +678,15 @@ class AlignmentCheck:
     stored_return: float
     stored_proxy: float
     #: ``returns`` and ``proxy`` read back out of the series the study was run
-    #: on, at ``target_index``. NaN when no series was supplied.
+    #: on, at ``target_index``. NaN when no series was supplied — which is what
+    #: ``series_checked`` distinguishes from a series that is NaN there.
     series_return: float
     series_proxy: float
+    #: Whether a comparison series was supplied at all. Without it the
+    #: alignment half of the check did not run, and its errors are ``nan``
+    #: (not checked) rather than ``inf`` (checked and disagreed) — the two must
+    #: not look alike to a ``max() < tol`` gate.
+    series_checked: bool = False
 
     @property
     def crps_abs_error(self) -> float:
@@ -692,10 +698,14 @@ class AlignmentCheck:
 
     @property
     def return_abs_error(self) -> float:
+        if not self.series_checked:
+            return math.nan
         return _abs_error(self.stored_return, self.series_return)
 
     @property
     def proxy_abs_error(self) -> float:
+        if not self.series_checked:
+            return math.nan
         return _abs_error(self.stored_proxy, self.series_proxy)
 
     @property
@@ -762,6 +772,7 @@ def alignment_check(
         stored_proxy=proxy_var,
         series_return=float(returns[target]) if returns is not None else math.nan,
         series_proxy=float(proxy[target]) if proxy is not None else math.nan,
+        series_checked=returns is not None or proxy is not None,
     )
 
 

@@ -426,6 +426,14 @@ class TestAlignment:
         assert check.crps_abs_error < 1e-15  # self-consistent...
         assert check.return_abs_error > 0.0  # ...and still misaligned
 
+    def test_no_series_reads_as_not_checked_not_as_a_disagreement(self) -> None:
+        """``nan`` (not checked) and ``inf`` (checked and disagreed) must not
+        look alike to a caller gating on ``max() < tol``."""
+        check = alignment_check(_row(), levels=(0.01, 0.05))
+        assert not check.series_checked
+        assert math.isnan(check.return_abs_error)
+        assert math.isnan(check.proxy_abs_error)
+
     def test_a_wrong_stored_loss_is_caught(self) -> None:
         row = _row()
         row["crps"] = 0.5  # not what this law and this target give
