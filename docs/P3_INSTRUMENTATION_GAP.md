@@ -19,13 +19,14 @@ done, deliberately**: wiring the signals into `fit_status` cannot reach the
 cannot ship at all without moving all 143 config hashes. Both reasons are
 demonstrated in §4. The wiring is written down there instead.
 
-**The one number a reader should not skip.** Six of the eight uninstrumented
-estimating configs turn out to have nothing to report — but `autoarima`'s
-optimizer returns a **non-zero status on 2,334 of its 2,366 fits (98.6 %)**,
-the status `statsforecast` itself warns about, and nothing in the store records
-it (§3.1). Whether that matters is a question for the results review. That the
-question was not previously *askable* from the committed artifacts is the point
-of this document.
+**The one number a reader should not skip.** Exactly one of the eight has a
+signal shaped like a *failure*: `autoarima`'s optimizer returns a **non-zero
+status on 2,334 of its 2,366 fits (98.6 %)** — the status `statsforecast`
+itself warns about — and nothing in the store records it (§3.1). The other
+seven report health or selection values, and none of those shows a fit that did
+not do what it was asked (§3.2–§3.6). Whether the `autoarima` figure matters is
+a question for the results review. That the question was not previously
+*askable* from the committed artifacts is the point of this document.
 
 **The reporting rule from here on.** In every fallback-rate table anyone
 produces, the ten uninstrumented configs read **`not instrumented`** — never
