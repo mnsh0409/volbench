@@ -82,9 +82,9 @@ oversight:
 
 `evaluate.run_backtest` builds the config from a **probe** — `probe =
 model_factory()`, an *unfitted* instance — and hashes `probe.spec()`. The
-sidecar records that same unfitted spec. So even for the two adapters whose
-*fitted* `spec()` already carries the diagnostic (`patchtst`, the three TSFMs),
-the sidecar carries the hyperparameters and nothing else. Verified on the
+sidecar records that same unfitted spec. So even for the four adapters whose
+*fitted* `spec()` already carries the diagnostic — `patchtst` and the three
+TSFMs — the sidecar carries the hyperparameters and nothing else. Verified on the
 stored artifact:
 
 ```
