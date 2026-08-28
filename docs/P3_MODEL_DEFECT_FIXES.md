@@ -457,3 +457,33 @@ and this branch changes things both of them describe. Flagged, not edited:
 - **`docs/P3_GRID.md` and `docs/P3_GRID_manifest.json`** describe the pre-fix
   grid. 44 of their 143 cells now have different hashes and different numbers;
   `data/grid_primary/manifest_fix.json` is the current one.
+
+---
+
+## 9. The gate
+
+| leg | result |
+|---|---|
+| `pytest`, Python **3.11.5**, `--extra classical --extra tsfm`, with `VOLBENCH_RUN_TSFM=1 VOLBENCH_RUN_GPU=1` | **1,323 passed**, 0 failed, 1 skipped |
+| `pytest`, Python **3.12.14**, `--extra classical` | **1,323 collected, 1,288 passed**, 0 failed, 35 skipped |
+| `pytest`, Python **3.13.15**, `--extra classical` | **1,323 collected, 1,288 passed**, 0 failed, 35 skipped |
+| `ruff check .` on all three | clean |
+| `mypy` (strict, `src`) on all three | no issues in 52 source files |
+| `make benchmark` | green; the toy fixture regenerates to a no-op and the eight pinned identities are as expected — `lgbm`'s moved, the other seven byte-identical |
+
+The 3.11 leg is the one that matters for these fixes: it is the only environment
+carrying the `tsfm` extra, so the tsfm-marked adapter tests — `chronos`,
+`timesfm` and `moirai` against real checkpoints, where the tail closure's
+assertions live — actually ran rather than skipping. The 35 skips on 3.12/3.13
+are those tests plus the torch-backed ones, which have no torch in those venvs.
+
+**CI has not run on this branch, and cannot as configured.**
+`.github/workflows/ci.yml` triggers on pushes to `main`, `feat/**` and `m2/**`;
+this is `fix/**`, so the push created no workflow run (confirmed against the
+Actions API: `total_count: 0` for the branch). CI's own matrix is ruff + mypy +
+pytest on 3.11 / 3.12 / 3.13 under `--extra classical --extra torch-cpu` with
+the same two env pins, all of which ran locally above — but that is a
+substitute for CI, not CI. Reaching it needs either a pull request (the
+`pull_request` trigger has no branch filter) or `fix/**` added to the push
+trigger, and both are decisions for the planning machine rather than changes to
+make inside a branch whose rule is to change nothing unnamed.
