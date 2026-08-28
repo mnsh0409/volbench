@@ -45,13 +45,13 @@ is the smallest strictly positive variance forecast over all 13 models.
 | NDX | 4,942 | 1.572e-07 | 0 | 0 | 0 | 1.255e-05 | 0 | 0 |
 | NKX | 4,795 | **6.716e-11** | **1** | 0 | 0 | 5.764e-06 | 0 | 168 |
 | SPY | 4,904 | 1.124e-06 | 0 | 0 | 0 | 6.469e-06 | 0 | 0 |
-| TWSE | 4,801 | **4.401e-11** | 0 | 0 | 80 | 6.491e-06 | 0 | 80 (see note) |
+| TWSE | 4,801 | **4.401e-11** | 0 | 0 | 80 | 6.491e-06 | 0 | 0 |
 
 The proxy is a property of the asset, not of the model: the target column is
 identical across each asset's 13 cells (`proxy_distinct_series = 1` for all
-eleven, checked). NKX's 168 NaN forecasts are the `InsufficientHistoryError`
-rows of §2 — 21 origins x 8 variance-fed configs. The TWSE figure in the last
-column is NaN *targets*, not forecasts; no forecast is NaN there.
+eleven, checked). NKX's 168 NaN forecasts are the only ones in the grid, and
+they are the `InsufficientHistoryError` rows of §2 — 21 origins x 8
+variance-fed configs, on which no forecast was produced at all.
 
 ### 1.2 How zeros and floors are handled
 
