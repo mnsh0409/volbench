@@ -11,7 +11,7 @@ forecast.
 
 | | |
 |---|---|
-| Package | volbench 0.6.0, branch `feat/p3-analysis`, at `99e3ea4` |
+| Package | volbench 0.6.0, branch `feat/p3-analysis` (from `99e3ea4`) |
 | Grid | 143 cells = 11 assets x 13 configs x h=1 x 1 arm; 645,151 rows |
 | Store | `data/grid_primary/store/` — 143 parquet fragments + 143 JSON sidecars |
 | Manifest | `docs/P3_GRID_manifest.json` (byte-identical to `data/grid_primary/manifest_primary.json`) |
@@ -28,7 +28,7 @@ forecast.
 | 2 | Per-row losses stored or recomputable: CRPS, log score, pinball, QLIKE, FZ0 | **Confirmed, with a split** — four stored, FZ0 recomputable exactly |
 | 3 | VaR/ES per row recoverable or stored | **Confirmed** — stored, at 0.01 / 0.025 / 0.05, lower tail |
 | 4 | `docs/` holds the manifest with config hashes, thread pins **and data digests** | **Partly wrong** — hashes and pins yes; **digests are not committed anywhere** |
-| 5 | Convergence/fallback recorded per fit, fit origin recoverable | **Confirmed exactly** — and only for 3 of 13 configs (see §3) |
+| 5 | Convergence/fallback recorded per fit, fit origin recoverable | **Confirmed exactly** — and only for 3 of 13 configs (docs/P3_INSTRUMENTATION_GAP.md) |
 | 6 | `econ.py` exists, imports nothing from the package | **Confirmed** |
 | 7 | Named crisis windows in the codebase | **Confirmed** — 4 dated + 1 deliberately undated; **not** the fallback dates |
 | 8 | Which interpreter ran the grid | **Recorded here for the first time** — CPython **3.11.5** |
@@ -70,7 +70,7 @@ series the cell was run on. Dates are recoverable only by rebuilding the panel
 (`build_panel()`, ~63 s) and applying the driver's leading trim. This matters
 for the crisis sub-samples of §7, which are defined by dates: the join is
 `results.target_index -> panel position -> timestamp`, and it is an extra step
-with an off-by-one in it (§5 of docs/P3_ANALYSIS_VALIDITY.md).
+with an off-by-one in it (§4 of docs/P3_ANALYSIS_VALIDITY.md).
 
 **No protocol-arm column.** The arm is a property of the *cell*, and it lives
 in the manifest (`cells[].arm`), not in the fragment. The arm's *settings*
@@ -105,7 +105,7 @@ defined wherever a forecast exists.
 
 The three losses that are stored *and* recomputable were recomputed from
 independent closed forms over all 645,151 rows as the alignment canary;
-agreement is at machine precision. See docs/P3_ANALYSIS_VALIDITY.md §5.
+agreement is at machine precision. See docs/P3_ANALYSIS_VALIDITY.md §4.
 
 ## 3. VaR and ES — stored, and the predictive law is recoverable
 
