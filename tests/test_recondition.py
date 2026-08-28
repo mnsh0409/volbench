@@ -78,6 +78,15 @@ N_ORIGINS = 200
 #: estimator, and it is what took ``garch11_t``'s BLAS-thread sensitivity from
 #: 5.5e-1 to 2.9e-6 (docs/P3_DETERMINISM.md §4).
 #:
+#: And once more for ``lgbm`` **alone**, when its smearing factor moved onto
+#: out-of-fold residuals (``smearing_residuals``, now a hashed field of its
+#: ``spec()``). **Its numbers moved with it**, which is the point of the fix —
+#: the in-sample factor understated the retransformation by ~22 % on the real
+#: panel (docs/P3_LGBM_SMEARING_AUDIT.md §2) — and the other seven cells here
+#: are byte-identical, which is the point of hashing the construction: a
+#: change that moves numbers must move exactly the identities of the cells
+#: whose numbers moved, and no others.
+#:
 #: These identities are only defined under the thread pin — hence
 #: ``@pytest.mark.pinned_identity``, which skips them on an unpinned shell
 #: rather than reporting a machine's different-but-correct answer as a
@@ -89,7 +98,7 @@ PINNED_CONFIG_HASHES = {
     "garch11": "d5db8995df4c16e8faf3ae1cd75eea463a0f0bedee27a5df4c9aa184f5224464",
     "garch11_t": "dd95b567c1eaddd78bfc01f910d4f61db2bdcef9b83b5832f18a0f4ea06f3075",
     "har": "d12f6e460217bc592fb44dcc923fe30866d4223faaa80ab787a6da7ce5b1060b",
-    "lgbm": "adfdb5a13283167a45787ac2e6c438a7cc00ad673a04f982320b9a1d6c7ab701",
+    "lgbm": "16bddb9c00b43104a60008525d6ce5863245b9ee9a32221aedcca85ffe471005",
     "naive": "e4dfb12b52b6ae5af584a37c9262d819ae9cade6edde4c5ea80182d43163a38c",
 }
 

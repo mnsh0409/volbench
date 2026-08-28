@@ -2,13 +2,16 @@
 """LightGBM's Duan smearing factor, measured on the real panel.
 
 ``models/lgbm.py`` retransforms ``E[log RV]`` to a variance with Duan's (1983)
-smearing factor ``mean(exp(e))`` over the fit window's **in-sample** residuals.
-Duan's estimator wants residuals that behave like draws from the *forecast-
-error* distribution, and a boosted ensemble's in-sample residuals do not: the
-ensemble shrinks them, which drives the factor toward 1 and quietly turns the
-variance forecast back into a median forecast. The size of that was measured
-once, on a toy fixture (docs/P2_INTEGRATION.md §3.2). This module measures it on
-21 years of index data.
+smearing factor ``mean(exp(e))``. Duan's estimator wants residuals that behave
+like draws from the *forecast-error* distribution, and a boosted ensemble's
+**in-sample** residuals do not: the ensemble shrinks them, which drives the
+factor toward 1 and quietly turns the variance forecast back into a median
+forecast. The size of that was measured once, on a toy fixture
+(docs/P2_INTEGRATION.md §3.2). This module measured it on 21 years of index
+data (docs/P3_LGBM_SMEARING_AUDIT.md), and the adapter's default moved to the
+out-of-fold construction as a result — so this module is now both the record
+of the defect and the check that it stays fixed
+(:mod:`volbench.benchmarks.defect_tables`).
 
 Three residual scales, and the difference between them is the whole point
 =========================================================================
@@ -19,8 +22,15 @@ Three residual scales, and the difference between them is the whole point
     into contiguous blocks and each block is predicted by a booster trained
     only on the blocks before it. Never a random split — a random fold of a
     time series lets tomorrow's neighbours predict today (docs/design.md).
-    This is the implementable fix, and it trains on less data than the real fit
-    does, so it is an upper bound on what the fix would deliver.
+    Since the fix, this construction *is* the adapter's
+    (:func:`volbench.models.lgbm.out_of_fold_residuals`, imported here rather
+    than restated), so this arm measures the shipped estimator rather than a
+    proposal for one.
+``shipped``
+    Whatever ``LightGBMRV.fit`` actually used — ``smear_shipped``. It equals
+    the out-of-fold column under the default config and the in-sample column
+    under ``smearing_residuals="in_sample"``. Recorded separately so the
+    comparison stays true whichever arm a re-run is pointed at.
 ``realized``
     ``log RV_{t+1} - mu_hat_t`` at the grid's own scored origins: the genuine
     one-step forecast error. Not implementable as a factor — it reads the
@@ -28,9 +38,10 @@ Three residual scales, and the difference between them is the whole point
     the target both other scales are judged against.
 
 ``mu_hat_t`` is not re-run: it is recovered exactly from the stored fragment as
-``log(forecast_var_t) - log(smear)``, with ``smear`` the factor of the refit
-block that row rests on (``fit_origin``). ``update`` never re-estimates the
-factor, so it is constant within a block by construction.
+``log(forecast_var_t) - log(smear_shipped)``, with ``smear_shipped`` the factor
+of the refit block that row rests on (``fit_origin``). ``update`` never
+re-estimates the factor, so it is constant within a block by construction, and
+the inversion is exact whichever arm produced it.
 
 The primary store is read-only here: this module writes only to its own
 ``--out`` parquet, moves no config hash and rewrites no fragment.
@@ -60,7 +71,13 @@ from numpy.typing import NDArray
 from volbench.benchmarks.grid_primary import ARM, asset_data
 from volbench.data.panel import build_panel
 from volbench.models._rv import smearing_factor, validated_rv
-from volbench.models.lgbm import FEATURE_NAMES, LightGBMRV, _design_matrix
+from volbench.models.lgbm import (
+    DEFAULT_OOF_FOLDS,
+    FEATURE_NAMES,
+    LightGBMRV,
+    _design_matrix,
+    out_of_fold_residuals,
+)
 from volbench.results import ResultsStore
 from volbench.runner import AssetData
 
@@ -72,10 +89,9 @@ __all__ = [
     "round_ladder",
 ]
 
-#: Contiguous, chronological blocks the training window is cut into. Five
-#: leaves the first block as training-only and predicts the other four, so 80 %
-#: of the window's rows contribute an out-of-fold residual.
-DEFAULT_FOLDS: Final = 5
+#: The adapter's own fold count, re-exported under the name this module and
+#: docs/P3_LGBM_SMEARING_AUDIT.md have always used for it.
+DEFAULT_FOLDS: Final = DEFAULT_OOF_FOLDS
 
 #: Boosting-round counts for the capacity question: is the shipped 100-round
 #: cap binding on the *training* loss, i.e. would more rounds keep shrinking the
@@ -88,32 +104,6 @@ def _train(config: LightGBMRV, x: NDArray[np.float64], y: NDArray[np.float64], r
 
     dataset = lgb.Dataset(x, label=y, feature_name=list(FEATURE_NAMES), free_raw_data=False)
     return lgb.train(config._params(), dataset, num_boost_round=rounds)
-
-
-def out_of_fold_residuals(
-    config: LightGBMRV,
-    x: NDArray[np.float64],
-    y: NDArray[np.float64],
-    folds: int = DEFAULT_FOLDS,
-) -> NDArray[np.float64]:
-    """Residuals from expanding chronological folds inside one training window.
-
-    Block ``k`` is predicted by a booster trained on blocks ``0..k-1`` only, so
-    no residual is ever produced by a model that saw its own row or any later
-    one. Block ``0`` yields none — there is nothing before it — which is the
-    unavoidable price of keeping the fold causal.
-    """
-    n = y.size
-    edges = np.linspace(0, n, folds + 1).astype(int)
-    out: list[NDArray[np.float64]] = []
-    for k in range(1, folds):
-        train_end, block_end = edges[k], edges[k + 1]
-        if train_end < 2 or block_end <= train_end:
-            continue
-        booster = _train(config, x[:train_end], y[:train_end], config.num_boost_round)
-        pred = np.asarray(booster.predict(x[train_end:block_end]), dtype=np.float64).reshape(-1)
-        out.append(y[train_end:block_end] - pred)
-    return np.concatenate(out) if out else np.empty(0, dtype=np.float64)
 
 
 def round_ladder(
@@ -169,11 +159,18 @@ def probe_asset(
             row.update(
                 {
                     "n_rows": int(y.size),
-                    "smear_in_sample": float(fitted.smear),
+                    # Read off the residuals directly, never off ``fitted.smear``:
+                    # which residuals that holds is now a config choice, and a
+                    # column named after a construction must be that construction.
+                    "smear_in_sample": smearing_factor(resid),
                     "resid_var_in_sample": float(np.mean(resid * resid)),
                     "smear_out_of_fold": smearing_factor(oof) if oof.size else math.nan,
                     "resid_var_out_of_fold": float(np.mean(oof * oof)) if oof.size else math.nan,
                     "n_oof": int(oof.size),
+                    # What ``fit`` actually used at this origin: the factor every
+                    # stored ``forecast_var`` of this refit block was built with.
+                    "smear_shipped": float(fitted.smear),
+                    "smearing_residuals": config.smearing_residuals,
                     "probe_error": None,
                 }
             )

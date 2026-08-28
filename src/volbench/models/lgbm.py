@@ -60,6 +60,13 @@ full series. Concretely:
   a *random* split of a time series into train/validation is itself a leak
   (tomorrow's neighbours predict today). Fixed rounds sidestep the question
   rather than answering it badly.
+- The out-of-fold folds the smearing factor is read off (below) are
+  **chronological and expanding**, never random, for exactly that reason:
+  block ``k`` is predicted by a booster trained on blocks ``0..k-1`` only, so
+  no residual is ever produced by a model that saw its own row or any later
+  one. ``tests/test_models_lgbm.py::TestOutOfFoldFoldsAreCausal`` is the
+  canary: corrupt every design row from one fold boundary onward and the
+  residuals of the fold before it must not move by one bit.
 
 Retransformation
 ================
@@ -69,35 +76,71 @@ mean. Same two arms as ``models/sf.py``, same default, both documented with
 their evidence in ``volbench.models._rv``:
 
 - ``retransform="smearing"`` (DEFAULT): Duan (1983) — ``exp(mu) * mean(exp(e))``
-  over the fit window's in-sample residuals.
+  over the fit window's residuals. **Which** residuals is the separate,
+  config-hashed ``smearing_residuals`` choice below; it defaults to
+  ``"out_of_fold"``.
 - ``retransform="gaussian"``: ``exp(mu + sigma^2/2)`` with ``sigma^2`` the
-  in-sample residual variance — exactly what ``models/har.py`` does, kept as
-  the like-for-like comparison arm.
+  **in-sample** residual variance — exactly what ``models/har.py`` does, kept
+  as the like-for-like comparison arm, and therefore deliberately unaffected
+  by ``smearing_residuals``: an arm whose whole purpose is to be HAR's
+  estimator on this model's residuals must keep HAR's construction.
 
 Both factors are estimated once, at the scheduled fit, and are one-step
 quantities reused at every horizon (see ``_rv``'s "Horizon caveat").
 
-**A caveat this model has and HAR does not, stated plainly.** Duan's estimator
-wants residuals that behave like draws from the forecast-error distribution.
-HAR is an OLS with four parameters, so its in-sample residuals are close to
-that. A boosted ensemble's are not: capacity shrinks them, and a shrunken
-residual set drives the correction factor toward 1, which quietly turns the
-variance forecast back into a *median* forecast. Measured on the toy fixture
-at 500-observation windows, LightGBM's stock shape (300 rounds, 31/15 leaves,
-``min_data_in_leaf=20``) puts the in-sample log-space residual variance at
-0.015 against a realized one-step forecast-error variance of 0.42 — a 28x
-understatement, and a smearing factor of 1.008 where HAR's is 1.207.
+**Which residuals the factor is read off —** ``smearing_residuals``, and the
+defect it exists to fix
+-------------------------------------------------------------------------
 
-That is why the defaults below are a *deliberately small* ensemble
-(depth-2 trees, ``min_data_in_leaf`` at ~12% of the training rows, ``lambda_l2
-= 5``) rather than LightGBM's usual shape: at that capacity the in-sample
-variance is 0.28 against 0.38, an optimism of the same order as HAR's own.
-``tests/test_models_lgbm.py::TestRetransformation::
-test_the_ensemble_does_not_memorize_its_own_residuals`` is the regression
-guard — raise the capacity and it fails, rather than the correction silently
-going away. The residual understatement is not eliminated, only bounded; the
-honest fix is an out-of-fold estimate of the factor, which is a Phase-2
-modelling decision and not something to introduce as a side effect here.
+Duan's estimator wants residuals that behave like draws from the forecast-
+error distribution. HAR is an OLS with four parameters, so its in-sample
+residuals are close to that. A boosted ensemble's are not: capacity shrinks
+them, and a shrunken residual set drives the correction factor toward 1,
+which quietly turns the variance forecast back into a *median* forecast.
+Measured on the toy fixture at 500-observation windows, LightGBM's stock
+shape (300 rounds, 31/15 leaves, ``min_data_in_leaf=20``) puts the in-sample
+log-space residual variance at 0.015 against a realized one-step forecast-
+error variance of 0.42 — a 28x understatement, and a smearing factor of 1.008
+where HAR's is 1.207.
+
+Two things bound it, and only the second one removes it:
+
+``in_sample``
+    The original construction: ``mean(exp(e))`` over the rows the booster
+    trained on. It is kept as a named, config-hashed arm because it is what
+    the deliberately small ensemble below was sized for — depth-2 trees,
+    ``min_data_in_leaf`` at ~12% of the training rows, ``lambda_l2 = 5`` —
+    and because the size of its bias is a measurement this package reports.
+    ``tests/test_models_lgbm.py::TestRetransformation::
+    test_the_ensemble_does_not_memorize_its_own_residuals`` is its regression
+    guard: raise the capacity on that arm and it fails, rather than the
+    correction silently going away.
+
+``out_of_fold`` (DEFAULT)
+    Expanding chronological folds inside the training window
+    (:func:`out_of_fold_residuals`): the design rows are cut into
+    ``oof_folds`` contiguous blocks and block ``k`` is predicted by a booster
+    trained on blocks ``0..k-1`` only. The residuals are then genuine
+    one-step-ahead errors of the same estimator at a smaller sample size, not
+    fitted residuals, which is what Duan's iid-draws condition asks for.
+
+**The measurement that settles the default** (``docs/P3_LGBM_SMEARING_AUDIT.md``,
+all 2,366 refit origins of the primary grid, 11 assets, 21 years of index
+data). At the panel median the in-sample factor is **1.371** where the grid's
+own realized one-step forecast errors imply **1.678** — every stored ``lgbm``
+variance sat ~17.9 % below the retransformation the theory asks for, with the
+same sign on all eleven assets and a ratio of 5.57 against 1.37 inside the
+COVID window. The out-of-fold factor is **1.703** against that same realized
+1.678: a 1.5 % overshoot, in the direction fewer training rows predicts.
+
+**A limitation this does not fix, recorded rather than worked around.** The
+100-round cap is binding on the *training* loss — MSE falls monotonically
+from 0.78 at 25 rounds to 0.24 at 800 with no plateau, and the in-sample
+factor falls with it from 1.49 to 1.13 (audit §4). The capacity choice and
+the in-sample factor's collapse are one mechanism, so the numbers above must
+not be read as a property of the retransformation alone. Raising the cap
+would change the model rather than fix the estimator, and is deliberately not
+done here.
 
 Re-conditioning between refits — ``SupportsUpdate`` IS implemented, exactly
 ==========================================================================
@@ -107,8 +150,9 @@ re-conditioning, it *is* re-conditioning: the booster is a deterministic
 function from a feature row to a prediction, so moving the RV buffer to the
 end of a later window and re-reading the lags gives precisely the forecast
 that a model with those parameters and that information set should make.
-Nothing is re-estimated — not the trees, not the smearing factor, not the
-residual variance. ``update`` on the fit's own window reproduces the fit.
+Nothing is re-estimated — not the trees, not the smearing factor (whichever
+residuals it was read off), not the residual variance. ``update`` on the
+fit's own window reproduces the fit.
 
 Determinism (CLAUDE.md rule 3)
 ==============================
@@ -128,7 +172,7 @@ from __future__ import annotations
 import dataclasses
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -148,7 +192,26 @@ from volbench.models._rv import (
 if TYPE_CHECKING:
     import lightgbm as lgb
 
-__all__ = ["FittedLightGBMRV", "LightGBMRV"]
+__all__ = [
+    "DEFAULT_OOF_FOLDS",
+    "FittedLightGBMRV",
+    "LightGBMRV",
+    "SmearingResiduals",
+    "out_of_fold_residuals",
+]
+
+#: Which residuals Duan's smearing factor is estimated from. A named,
+#: config-hashed option rather than a silent default, for the same reason
+#: ``retransform`` is one (``volbench.models._rv``): the two produce
+#: numerically different variance forecasts from one booster.
+SmearingResiduals = Literal["in_sample", "out_of_fold"]
+
+#: Contiguous, chronological blocks the training window is cut into for the
+#: out-of-fold factor. Five leaves the first block as training-only and
+#: predicts the other four, so 80 % of the window's rows contribute an
+#: out-of-fold residual — the setting docs/P3_LGBM_SMEARING_AUDIT.md measured
+#: 1.703 against a realized 1.678 at.
+DEFAULT_OOF_FOLDS: Final = 5
 
 #: Lags 1..22 of log RV. 22 is HAR's monthly window, so the lag block and the
 #: monthly aggregate see the same information set.
@@ -212,6 +275,64 @@ def _design_matrix(
     return np.asarray(rows, dtype=np.float64), np.asarray(targets, dtype=np.float64)
 
 
+def out_of_fold_residuals(
+    config: LightGBMRV,
+    x: NDArray[np.float64],
+    y: NDArray[np.float64],
+    folds: int = DEFAULT_OOF_FOLDS,
+) -> NDArray[np.float64]:
+    """Residuals from expanding chronological folds inside one training window.
+
+    The design rows are cut into ``folds`` contiguous blocks in their own
+    order — never a random split, which on a time series lets tomorrow's
+    neighbours predict today (``docs/design.md``) — and block ``k`` is
+    predicted by a booster trained on blocks ``0..k-1`` only. Block ``0``
+    yields no residual, there being nothing before it; that is the
+    unavoidable price of keeping the fold causal, and it is why the estimate
+    trains on 20-80 % of the window rather than all of it.
+
+    **The causal boundary, stated arithmetically**, because it is the one
+    thing a corruption canary cannot see. Design row ``i`` reads
+    ``rv[i : i + 22]`` and predicts ``rv[i + 22]``, so a booster trained on
+    rows ``0..train_end-1`` has seen targets up to ``rv[train_end + 21]`` —
+    exactly the last observation known at the origin of row ``train_end``,
+    whose own target is ``rv[train_end + 22]``. Causal with no gap, and no
+    gap needed. ``tests/test_models_lgbm.py::TestOutOfFoldFoldsAreCausal``
+    pins both halves.
+
+    Raises ``ValueError`` when no fold can be formed rather than silently
+    returning an empty array: an empty residual set would fall through to a
+    factor that is not the one ``spec()`` names.
+    """
+    import lightgbm as lgb
+
+    if folds < 2:
+        raise ValueError("oof_folds must be >= 2")
+    n = int(y.size)
+    edges = np.linspace(0, n, folds + 1).astype(int)
+    out: list[NDArray[np.float64]] = []
+    for k in range(1, folds):
+        train_end, block_end = int(edges[k]), int(edges[k + 1])
+        if train_end < 2 or block_end <= train_end:
+            continue
+        dataset = lgb.Dataset(
+            x[:train_end],
+            label=y[:train_end],
+            feature_name=list(FEATURE_NAMES),
+            free_raw_data=False,
+        )
+        booster = lgb.train(config._params(), dataset, num_boost_round=config.num_boost_round)
+        pred = np.asarray(
+            booster.predict(x[train_end:block_end]), dtype=np.float64
+        ).reshape(-1)
+        out.append(y[train_end:block_end] - pred)
+    if not out:
+        raise ValueError(
+            f"a window of {n} design rows is too short to form {folds} causal folds"
+        )
+    return np.concatenate(out)
+
+
 @dataclass(frozen=True, eq=False)
 class FittedLightGBMRV:
     """A trained booster plus the RV buffer its next forecast reads.
@@ -230,9 +351,12 @@ class FittedLightGBMRV:
     #: The last ``_M_WINDOW`` realized variances — the regressors of the next
     #: forecast. Moves with ``update``; nothing else does.
     buffer: NDArray[np.float64]
-    #: Duan's smearing factor over the fit window's in-sample residuals.
+    #: Duan's smearing factor over the residuals ``config.smearing_residuals``
+    #: names — out-of-fold by default, in-sample on the other arm.
     smear: float
-    #: In-sample residual variance in log space, for the ``gaussian`` arm.
+    #: **In-sample** residual variance in log space, for the ``gaussian`` arm
+    #: and for the capacity guard. In-sample on both arms by construction:
+    #: the ``gaussian`` arm exists to be HAR's estimator (module docstring).
     resid_var: float
 
     @property
@@ -292,6 +416,14 @@ class LightGBMRV:
     """
 
     retransform: Retransform = "smearing"
+    #: Which residuals the ``smearing`` arm's factor is estimated from. The
+    #: default is the out-of-fold construction; ``"in_sample"`` is the
+    #: original one, kept as a named arm (module docstring). Inert on the
+    #: ``gaussian`` arm, and recorded in ``spec()`` regardless, because a
+    #: field that decides a number must decide the identity of every run.
+    smearing_residuals: SmearingResiduals = "out_of_fold"
+    #: Chronological blocks the out-of-fold estimate cuts the window into.
+    oof_folds: int = DEFAULT_OOF_FOLDS
     num_boost_round: int = 100
     learning_rate: float = 0.05
     #: 4 leaves == depth-2 trees. Two-way interactions among lagged log-RVs
@@ -311,6 +443,10 @@ class LightGBMRV:
     def __post_init__(self) -> None:
         if self.retransform not in ("smearing", "gaussian"):
             raise ValueError("retransform must be 'smearing' or 'gaussian'")
+        if self.smearing_residuals not in ("in_sample", "out_of_fold"):
+            raise ValueError("smearing_residuals must be 'in_sample' or 'out_of_fold'")
+        if self.oof_folds < 2:
+            raise ValueError("oof_folds must be >= 2")
         if self.num_boost_round < 1:
             raise ValueError("num_boost_round must be >= 1")
         if not 0.0 < self.learning_rate <= 1.0:
@@ -367,6 +503,8 @@ class LightGBMRV:
             "n_features": _N_FEATURES,
             "num_boost_round": self.num_boost_round,
             "retransform": self.retransform,
+            "smearing_residuals": self.smearing_residuals,
+            "oof_folds": self.oof_folds,
             "min_train": _MIN_TRAIN,
             **self._params(),
         }
@@ -383,10 +521,15 @@ class LightGBMRV:
             self._params(), dataset, num_boost_round=self.num_boost_round
         )
         resid = y - np.asarray(booster.predict(x), dtype=np.float64).reshape(-1)
+        smear_resid = (
+            out_of_fold_residuals(self, x, y, self.oof_folds)
+            if self.smearing_residuals == "out_of_fold"
+            else resid
+        )
         return FittedLightGBMRV(
             config=self,
             booster=booster,
             buffer=rv[-_M_WINDOW:].copy(),
-            smear=smearing_factor(resid),
+            smear=smearing_factor(smear_resid),
             resid_var=float(np.mean(resid * resid)),
         )

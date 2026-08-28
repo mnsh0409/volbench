@@ -16,8 +16,17 @@ Four things this file exists to pin:
    bit-identical forecast out, twice.
 4. **The retransformation is still doing something.** A high-capacity
    ensemble shrinks its own residuals until Duan's factor collapses to 1 and
-   the "variance" forecast is really a median forecast. The default config is
-   guarded against that.
+   the "variance" forecast is really a median forecast. The ``in_sample`` arm
+   is guarded against that, and the default arm does not read those residuals
+   at all.
+5. **The out-of-fold folds are causal.** The default smearing factor is read
+   off expanding chronological folds inside the training window, which is a
+   second place a time-series model can leak. It carries the same corruption
+   canary the rest of this file applies to the feature path
+   (``TestOutOfFoldFoldsAreCausal``) — ported here from
+   ``tests/test_lgbm_smearing_probe.py`` when the construction moved out of
+   the probe and into the adapter, because a probe being leakage-clean is not
+   evidence that the adapter is.
 """
 
 from __future__ import annotations
@@ -47,11 +56,13 @@ from volbench.models.lgbm import (
     _MIN_TRAIN,
     _N_FEATURES,
     _W_WINDOW,
+    DEFAULT_OOF_FOLDS,
     FEATURE_NAMES,
     FittedLightGBMRV,
     LightGBMRV,
     _design_matrix,
     _feature_row,
+    out_of_fold_residuals,
 )
 from volbench.splitter import RollingOriginSplitter
 
@@ -345,8 +356,18 @@ class TestRecoveryAndSanity:
     def test_forecast_tracks_the_level_of_the_toy_rv_series(
         self, config: LightGBMRV
     ) -> None:
+        """A conditional mean against an unconditional one, so the band is
+        wide by construction.
+
+        The upper edge was 2.0 while the smearing factor was read off
+        in-sample residuals; the out-of-fold factor is larger — that is the
+        whole of the fix — and on this fixture's last origin it puts the ratio
+        at 2.05. The band is widened rather than the factor trimmed: nothing
+        here says the forecast is *right*, only that it is on the scale of the
+        series it was fitted to.
+        """
         rv = toy_rv()[:500]
-        assert 0.5 < config.fit(rv).predict(1).variance() / float(np.mean(rv)) < 2.0
+        assert 0.5 < config.fit(rv).predict(1).variance() / float(np.mean(rv)) < 2.5
 
 
 # --------------------------------------------------------------------------
@@ -359,8 +380,12 @@ class TestRetransformation:
         assert LightGBMRV().retransform == "smearing"
 
     def test_the_smearing_factor_is_duans_mean_of_exponentiated_residuals(self) -> None:
+        """Duan's formula itself, on the arm whose residuals are the fitted
+        ones. The default arm's version of this is
+        ``test_the_factor_is_exactly_duans_mean_over_the_out_of_fold_residuals``.
+        """
         rv = toy_rv()[:500]
-        fitted = LightGBMRV().fit(rv)
+        fitted = LightGBMRV(smearing_residuals="in_sample").fit(rv)
         x, y = _design_matrix(rv)
         resid = y - np.asarray(fitted.booster.predict(x), dtype=np.float64).reshape(-1)
         assert fitted.smear == pytest.approx(float(np.mean(np.exp(resid))), rel=1e-15)
@@ -398,31 +423,175 @@ class TestRetransformation:
         assert smeared.predict(1).variance() != gaussian.predict(1).variance()
 
     def test_the_ensemble_does_not_memorize_its_own_residuals(self) -> None:
-        """THE capacity guard (module docstring). Duan's factor is estimated
-        from in-sample residuals, so an ensemble with enough capacity to drive
-        them toward zero drives the factor toward 1 and silently turns the
+        """THE capacity guard (module docstring), on the arm it guards.
+
+        The ``in_sample`` factor is estimated from residuals the booster has
+        already fitted, so an ensemble with enough capacity to drive them
+        toward zero drives that factor toward 1 and silently turns the
         variance forecast back into a median forecast.
 
         On the toy fixture the realized one-step log-space forecast-error
         variance is ~0.38 and HAR's in-sample residual variance is 0.377. The
-        default config must stay in that neighbourhood. LightGBM's stock shape
-        lands at 0.015 — a 25x understatement — and the second half of this
-        test shows the trap is real rather than hypothetical.
+        default *capacity* must stay in that neighbourhood — it is unchanged,
+        and it is what bounds this arm. LightGBM's stock shape lands at 0.015
+        — a 25x understatement — and the second half of this test shows the
+        trap is real rather than hypothetical.
         """
         rv = toy_rv()[:500]
-        default = LightGBMRV().fit(rv)
-        assert default.resid_var > 0.15, (
-            f"in-sample residual variance {default.resid_var:.4f} is far below the ~0.38 "
+        in_sample = LightGBMRV(smearing_residuals="in_sample").fit(rv)
+        assert in_sample.resid_var > 0.15, (
+            f"in-sample residual variance {in_sample.resid_var:.4f} is far below the ~0.38 "
             "realized forecast-error variance: the ensemble is memorizing and the "
             "retransformation has stopped correcting anything"
         )
-        assert default.smear > 1.05
+        assert in_sample.smear > 1.05
 
         memorizing = LightGBMRV(
-            num_boost_round=300, num_leaves=15, min_data_in_leaf=20
+            smearing_residuals="in_sample", num_boost_round=300, num_leaves=15,
+            min_data_in_leaf=20,
         ).fit(rv)
         assert memorizing.resid_var < 0.05
         assert memorizing.smear < 1.02  # the correction has collapsed
+
+    def test_out_of_fold_is_the_default_and_corrects_by_more(self) -> None:
+        """The fix, as a property rather than a panel number.
+
+        Out-of-fold residuals are genuine one-step errors of the same
+        estimator, so they are larger than the fitted ones and the factor they
+        imply is larger too. docs/P3_LGBM_SMEARING_AUDIT.md puts the panel
+        medians at 1.371 in-sample against a realized 1.678, and the
+        out-of-fold estimate at 1.703; the direction is what generalizes to
+        this fixture, not the magnitude.
+        """
+        assert LightGBMRV().smearing_residuals == "out_of_fold"
+        rv = toy_rv()[:500]
+        oof = LightGBMRV().fit(rv)
+        in_sample = LightGBMRV(smearing_residuals="in_sample").fit(rv)
+        assert oof.smear > in_sample.smear
+        # The point forecast is the same booster on both arms: only the
+        # retransformation moved.
+        assert oof.predict(1).variance() == pytest.approx(
+            in_sample.predict(1).variance() * oof.smear / in_sample.smear, rel=1e-12
+        )
+
+    def test_the_factor_is_exactly_duans_mean_over_the_out_of_fold_residuals(self) -> None:
+        rv = toy_rv()[:500]
+        config = LightGBMRV()
+        fitted = config.fit(rv)
+        x, y = _design_matrix(rv)
+        resid = out_of_fold_residuals(config, x, y, config.oof_folds)
+        assert fitted.smear == pytest.approx(float(np.mean(np.exp(resid))), rel=1e-15)
+        assert fitted.smear == pytest.approx(smearing_factor(resid), rel=1e-15)
+
+    def test_the_gaussian_arm_keeps_the_in_sample_residual_variance(self) -> None:
+        """``resid_var`` is HAR's estimator on this model's residuals and must
+        stay in-sample on both arms, or the like-for-like comparison arm stops
+        being like for like."""
+        rv = toy_rv()[:500]
+        x, y = _design_matrix(rv)
+        for residuals in ("out_of_fold", "in_sample"):
+            fitted = LightGBMRV(smearing_residuals=residuals).fit(rv)  # type: ignore[arg-type]
+            in_sample = y - np.asarray(
+                fitted.booster.predict(x), dtype=np.float64
+            ).reshape(-1)
+            assert fitted.resid_var == pytest.approx(
+                float(np.mean(in_sample * in_sample)), rel=1e-15
+            )
+
+
+# --------------------------------------------------------------------------
+# the out-of-fold folds: the second place this adapter could leak
+# --------------------------------------------------------------------------
+
+
+class TestOutOfFoldFoldsAreCausal:
+    """The canary, ported from ``tests/test_lgbm_smearing_probe.py``.
+
+    K's probe carried it while the construction lived there; the construction
+    now ships inside ``fit``, and a probe being leakage-clean is not evidence
+    that the adapter is. Same three claims, against the adapter's own
+    function: corruption cannot travel backwards, the boundary is causal with
+    no gap, and every fold but the first contributes.
+    """
+
+    def test_corrupting_the_future_leaves_earlier_folds_bit_identical(self) -> None:
+        """Replace every design row from the second fold boundary onward with
+        noise; the residuals of the fold *before* it must not move by one bit.
+        If a fold ever trained on data after its own block, they would."""
+        config = LightGBMRV()
+        x, y = _design_matrix(log_ar1_rv(n=600, seed=11))
+        edges = np.linspace(0, y.size, DEFAULT_OOF_FOLDS + 1).astype(int)
+        first_block = int(edges[2] - edges[1])
+
+        clean = out_of_fold_residuals(config, x, y, DEFAULT_OOF_FOLDS)
+
+        rng = np.random.default_rng(1)
+        x2, y2 = x.copy(), y.copy()
+        x2[edges[2] :] = rng.standard_normal(x2[edges[2] :].shape)
+        y2[edges[2] :] = rng.standard_normal(y2[edges[2] :].shape)
+        corrupted = out_of_fold_residuals(config, x2, y2, DEFAULT_OOF_FOLDS)
+
+        assert np.array_equal(clean[:first_block], corrupted[:first_block])
+        assert not np.array_equal(clean, corrupted)  # later folds must react
+
+    def test_a_fitted_factor_ignores_everything_after_its_own_window(self) -> None:
+        """The same claim through ``fit``, which is what the grid calls: the
+        smearing factor of a window must not depend on what follows it in the
+        array the window was sliced from."""
+        long = log_ar1_rv(n=800, seed=12)
+        poisoned = long.copy()
+        poisoned[400:] = 1e3
+        assert LightGBMRV().fit(long[:400]).smear == LightGBMRV().fit(poisoned[:400]).smear
+
+    def test_the_last_training_target_never_postdates_the_predicted_rows_origin(self) -> None:
+        """The boundary the canary cannot see, stated arithmetically.
+
+        Design row ``i`` reads ``rv[i : i+22]`` and predicts ``rv[i+22]``. A
+        booster trained on rows ``0..train_end-1`` has therefore seen targets
+        up to ``rv[train_end+21]`` — which is exactly the last observation
+        known at the origin of row ``train_end``, whose own target is
+        ``rv[train_end+22]``. Causal with no gap, and no gap needed.
+        """
+        rv = log_ar1_rv(n=200, seed=13)
+        _x, y = _design_matrix(rv)
+        train_end = 50
+        last_train_target_pos = train_end - 1 + _M_WINDOW
+        predicted_row_origin_pos = train_end + _M_WINDOW - 1
+        predicted_row_target_pos = train_end + _M_WINDOW
+        assert last_train_target_pos == predicted_row_origin_pos
+        assert last_train_target_pos < predicted_row_target_pos
+        assert y[train_end - 1] == pytest.approx(float(np.log(rv[last_train_target_pos])))
+
+    def test_every_fold_but_the_first_contributes(self) -> None:
+        config = LightGBMRV()
+        x, y = _design_matrix(log_ar1_rv(n=600, seed=14))
+        edges = np.linspace(0, y.size, DEFAULT_OOF_FOLDS + 1).astype(int)
+        residuals = out_of_fold_residuals(config, x, y, DEFAULT_OOF_FOLDS)
+        assert residuals.size == y.size - edges[1]
+
+    def test_a_window_too_short_to_fold_raises_rather_than_returning_nothing(self) -> None:
+        """In the adapter, unlike in the probe, an empty residual set must not
+        be survivable: it would fall through to a factor that is not the one
+        ``spec()`` names. ``run_backtest`` turns the raise into one NaN row."""
+        config = LightGBMRV()
+        x, y = _design_matrix(log_ar1_rv(n=_M_WINDOW + 2, seed=15))
+        assert y.size == 2
+        with pytest.raises(ValueError, match="too short to form"):
+            out_of_fold_residuals(config, x, y, folds=20)
+
+    def test_the_shipped_minimum_window_always_folds(self) -> None:
+        """``_MIN_TRAIN`` is the shortest window ``fit`` accepts, so it must be
+        long enough that the default folds exist — otherwise the raise above
+        would be reachable from the grid."""
+        fitted = LightGBMRV().fit(log_ar1_rv(n=_MIN_TRAIN, seed=16))
+        assert fitted.smear > 0.0
+
+    def test_the_folds_are_deterministic(self) -> None:
+        config = LightGBMRV()
+        x, y = _design_matrix(log_ar1_rv(n=600, seed=17))
+        first = out_of_fold_residuals(config, x, y, DEFAULT_OOF_FOLDS)
+        second = out_of_fold_residuals(config, x, y, DEFAULT_OOF_FOLDS)
+        assert np.array_equal(first, second)
 
 
 # --------------------------------------------------------------------------
@@ -575,6 +744,8 @@ class TestSpec:
             "n_features",
             "num_boost_round",
             "retransform",
+            "smearing_residuals",
+            "oof_folds",
             "min_train",
         ):
             assert extra in spec
@@ -582,6 +753,11 @@ class TestSpec:
     def test_spec_is_stable_and_discriminating(self) -> None:
         assert LightGBMRV().spec() == LightGBMRV().spec()
         assert LightGBMRV().spec() != LightGBMRV(retransform="gaussian").spec()
+        # The whole point of naming the construction in spec(): a fix that
+        # changed the numbers without moving the hash would let one
+        # config_hash name two different sets of forecasts.
+        assert LightGBMRV().spec() != LightGBMRV(smearing_residuals="in_sample").spec()
+        assert LightGBMRV().spec() != LightGBMRV(oof_folds=4).spec()
         assert LightGBMRV().spec() != LightGBMRV(num_leaves=8).spec()
         assert LightGBMRV().spec() != LightGBMRV(seed=1).spec()
         assert LightGBMRV().name != LightGBMRV(retransform="gaussian").name
@@ -601,6 +777,8 @@ class TestSpec:
         ("kwargs", "match"),
         [
             ({"retransform": "lognormal"}, "retransform"),
+            ({"smearing_residuals": "oob"}, "smearing_residuals"),
+            ({"oof_folds": 1}, "oof_folds"),
             ({"num_boost_round": 0}, "num_boost_round"),
             ({"learning_rate": 0.0}, "learning_rate"),
             ({"num_leaves": 1}, "num_leaves"),
