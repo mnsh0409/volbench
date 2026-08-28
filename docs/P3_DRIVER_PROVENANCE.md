@@ -163,7 +163,20 @@ primary store, and neither is imported by `volbench.analysis` (which is
 forbidden from importing `volbench.benchmarks` at all —
 `tests/test_analysis.py::TestBoundary`).
 
-## 7. What this does not fix
+## 7. Drift flagged, not edited
+
+`docs/P3_GRID.md` names the old path in two places — its header table
+(`Driver | data/grid_primary/run_grid.py (gitignored with the results)`) and
+§4 ("the only code written for this run is the driver, which is gitignored with
+the results it produced"). Both were true when that document was written and
+are now stale.
+
+They are **not** edited here. P3_GRID.md is the run report for a specific run
+on a specific commit, and silently rewriting its account of the tree it ran in
+would make it a worse record, not a better one. The correction lives in this
+document, which is the one about the move.
+
+## 8. What this does not fix
 
 `make reproduce` still covers the cheap models only, and adding the primary
 grid to it would put a 70-minute GPU run behind `make check`. The committed
