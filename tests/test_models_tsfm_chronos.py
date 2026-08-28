@@ -23,7 +23,7 @@ from tsfm_fakes import FakeBackend, realized_variance
 
 from volbench.models import Chronos
 from volbench.models.tsfm_chronos import DEFAULT_CHRONOS_CHECKPOINT, ChronosBackend
-from volbench.models.tsfm_common import quantile_grid_mean, resolve_hf_revision
+from volbench.models.tsfm_common import resolve_hf_revision, tail_closed_grid_mean
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _LEVELS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
@@ -176,11 +176,16 @@ class TestRealCheckpoint:
         meta = fitted.spec()["rv_forecasts"]["1"]
         grid = np.asarray(meta["values"])
         assert meta["crossings_rearranged"] == 0 and meta["clipped_at_zero"] == 0
-        assert grid[0] <= dist.variance() <= grid[-1]
         # sigma = sqrt(vhat); squaring it back is exact only to an ulp
         assert dist.variance() == pytest.approx(
-            quantile_grid_mean(np.asarray(meta["taus"]), grid), rel=1e-12
+            tail_closed_grid_mean(np.asarray(meta["taus"]), grid), rel=1e-12
         )
+        # The closure only re-expresses the two atoms, so the scored mean must
+        # still sit strictly above the flat-tailed one and inside the grid's
+        # own outer levels.
+        assert meta["tail_closure"] == "lognormal"
+        assert meta["flat_tail_mean"] < dist.variance()
+        assert grid[0] <= dist.variance() <= grid[-1]
         level = float(np.mean(rv[-22:]))
         assert 0.3 * level < dist.variance() < 3.0 * level
 

@@ -17,15 +17,14 @@ not a hidden convention):
 2. ``predict(h)`` feeds that context to the foundation model, takes the
    model's own predictive distribution of RV at ``t+h`` — the models emit it
    as a quantile grid — and uses its **MEAN** as the variance forecast
-   ``vhat``. The mean is the mean of the law whose quantile function is the
-   linear interpolant of the model's quantile grid, flat beyond the outermost
-   levels: the same reading :func:`volbench.evaluate.forecast_moments` gives
-   a ``QuantileGrid``, pinned equal to it in ``tests/test_models_tsfm_common.py``.
-   With flat tails it understates the mean of a right-skewed RV law; the
-   median (what the Chronos pipelines return under the name ``mean``) would
-   understate it more. The model's native point head, where one exists
-   (TimesFM, TimeGPT), is recorded next to the grid in the fitted ``spec()``
-   but is not used, so that every adapter is scored on one estimator.
+   ``vhat``, computed under a **lognormal tail closure**
+   (:func:`tail_closed_grid_mean`, and the section below on why that closure).
+   The mean is the right functional — QLIKE and MSE are both minimized at the
+   conditional mean — so what had to be fixed was never the choice of
+   functional but how the mean was computed. The model's native point head,
+   where one exists (TimesFM, TimeGPT), is recorded next to the grid in the
+   fitted ``spec()`` but is not used, so that every adapter is scored on one
+   estimator.
 3. The scored object is ``Normal(mu=0, sigma=sqrt(vhat))`` over the
    next-period **return** — the same shape HAR emits (CLAUDE.md rule 2: a
    model's variance forecast is the variance of its return distribution). The
@@ -48,6 +47,45 @@ grid (the rearrangement of Chernozhukov, Fernández-Val & Galichon, 2010);
 support — are clipped at zero. A forecast whose mean is still non-positive or
 non-finite raises ``ValueError``, which the evaluator records as a
 ``predict_error`` row rather than scoring a meaningless variance.
+
+THE TAIL CLOSURE, AND WHY IT IS LOGNORMAL
+=========================================
+
+A 9-level 0.1...0.9 grid says nothing about the law outside its outermost
+levels, and **20 % of the probability mass lives there**. Reading the tails
+as flat — a point atom of ``taus[0]`` at ``values[0]`` and ``1 - taus[-1]``
+at ``values[-1]`` — is one assumption among several, and on a right-skewed RV
+law it is the one that understates the mean. That is the D-014 truncation
+bias in the same family and for the same reason (``docs/design.md``), and
+``docs/P3_TSFM_VARIANCE_AUDIT.md`` measured it on the real panel: the
+tail-closed mean is **11 % to 21 % above** the flat-tailed one at the panel
+median (``chronos`` 1.135, ``timesfm`` 1.201, ``moirai`` 1.111), one-directional
+on every asset and every config, moving VaR and ES by exactly its square root.
+
+**The closure is lognormal because realized volatility is approximately
+lognormally distributed.** That is one of the better-established stylized
+facts in the realized-volatility literature — Andersen, Bollerslev, Diebold &
+Labys (2001), "The Distribution of Realized Exchange Rate Volatility",
+*JASA* 96(453), 42-55, and (2003), "Modeling and Forecasting Realized
+Volatility", *Econometrica* 71(2), 579-625, which is also the reason every
+log-RV model in this package (``models/har.py``, ``models/lgbm.py``,
+``models/sf.py``) works in logs at all. A lognormal tail on an RV quantile
+grid is therefore the closure with literature behind it, not the closure in
+the middle of the range.
+
+The grid's own interior is left exactly as the checkpoint emitted it; only
+the two atoms are re-expressed. **The tail beyond q(0.1) / q(0.9) is
+genuinely unidentified**, so :func:`grid_mean_under_closures` reports the
+flat, lognormal and log-linear readings side by side on demand — the paper
+states a range rather than implying the grid pins one number.
+
+**When the closure cannot be fitted, the flat tails stand.** A lognormal
+cannot describe a grid holding a zero — a clipped ``chronos``/``moirai``
+quantile or a package-floored ``timesfm`` one — and those origins (119, 215
+and 12 of 2,199 respectively, at h=1 on the primary grid) keep the flat-tailed
+mean and record ``tail_closure: "flat"`` in the fitted ``spec()``. They retain
+the understatement; imputing a shape onto a grid that contradicts it would be
+worse than reporting how often it happened.
 
 ``update(train)`` is context extension: the new fitted object holds the
 trailing window of ``train`` and nothing else, which is exactly what ``fit``
@@ -76,20 +114,25 @@ from typing import Any, Final, Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy import stats  # type: ignore[import-untyped]
 
 from volbench.dist import Distribution, Normal
 
 __all__ = [
+    "CLOSURES",
     "DEFAULT_INPUT_SCALE",
     "MIN_CONTEXT",
+    "VARIANCE_FROM",
     "FittedTSFM",
     "RVQuantileForecast",
     "TSFMBackend",
     "ZeroShotRVModel",
     "checkpoint_slug",
+    "grid_mean_under_closures",
     "quantile_grid_mean",
     "rearrange_quantiles",
     "resolve_hf_revision",
+    "tail_closed_grid_mean",
     "validated_rv",
 ]
 
@@ -100,6 +143,19 @@ DEFAULT_INPUT_SCALE: Final = 1e4
 #: models left-pad shorter inputs, but a forecast from a handful of points is
 #: not the experiment; the protocol's windows are 1000 observations.
 MIN_CONTEXT: Final = 32
+
+#: The tail closures :func:`grid_mean_under_closures` reports, in the order a
+#: sensitivity table should read them: the reading that shipped before the fix,
+#: the one that ships now, and the one that follows the grid's own edge
+#: spacing. Not a config option — the shipped closure is fixed, and this is the
+#: vocabulary for reporting what the others would have given.
+CLOSURES: Final = ("flat", "lognormal", "loglinear")
+
+#: What ``spec()`` records as the estimator behind ``vhat``, and therefore part
+#: of every TSFM config hash. It names the closure because the closure decides
+#: the number: leaving the label at ``mean_of_rv_quantile_grid`` while changing
+#: how that mean is computed would make every sidecar a false statement.
+VARIANCE_FROM: Final = "lognormal_tail_closed_mean_of_rv_quantile_grid"
 
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 
@@ -139,6 +195,99 @@ def quantile_grid_mean(taus: NDArray[np.float64], values: NDArray[np.float64]) -
     return (
         lo_mass * float(v[0]) + float(np.sum(w * (v[:-1] + v[1:]) / 2.0)) + hi_mass * float(v[-1])
     )
+
+
+def _lognormal_fit(
+    taus: NDArray[np.float64], values: NDArray[np.float64]
+) -> tuple[float, float] | None:
+    """``(mu, sigma)`` of a lognormal fitted to the grid by OLS in log-z space.
+
+    ``log q_tau = mu + sigma Phi^{-1}(tau)``, so the fit is one regression of
+    the logged quantiles on the standard-normal quantiles of their own levels.
+    Returns ``None`` — never a guess — when the grid holds a non-positive value
+    (a clipped quantile) or is degenerate, since a lognormal can describe
+    neither.
+    """
+    if np.any(values <= 0.0) or float(values[-1]) <= float(values[0]):
+        return None
+    z = stats.norm.ppf(taus)
+    y = np.log(values)
+    sigma = float(np.sum((z - z.mean()) * (y - y.mean())) / np.sum((z - z.mean()) ** 2))
+    if not (math.isfinite(sigma) and sigma > 0.0):
+        return None
+    return float(y.mean() - sigma * z.mean()), sigma
+
+
+def tail_closed_grid_mean(
+    taus: NDArray[np.float64], values: NDArray[np.float64], closure: str = "lognormal"
+) -> float:
+    """The grid's mean with the flat tails replaced by ``closure``'s own tails.
+
+    The interior — the mass between ``taus[0]`` and ``taus[-1]`` — is the same
+    trapezoid :func:`quantile_grid_mean` uses and is left exactly as the
+    checkpoint emitted it. Only the two atoms are re-expressed:
+
+    ``"flat"``
+        No closure at all: identical to :func:`quantile_grid_mean`, kept in
+        this vocabulary so a sensitivity table can name what shipped before.
+    ``"lognormal"``
+        A lognormal fitted to the whole grid (:func:`_lognormal_fit`), whose
+        partial expectations are closed form:
+        ``E[X 1{X < q_tau}] = exp(mu + s^2/2) Phi(z_tau - s)`` and its
+        complement above. **This is the shipped closure** (module docstring).
+    ``"loglinear"``
+        The same shape fitted to the outermost *pair* of levels at each end,
+        so the extrapolated tail follows the grid's own outer spacing rather
+        than its global shape. Heavier whenever the grid fans out at the edges.
+
+    Returns NaN when the closure cannot be fitted; callers decide what to do
+    about that, and :meth:`FittedTSFM.predict` falls back to the flat reading
+    and records having done so.
+    """
+    t = np.asarray(taus, dtype=np.float64)
+    v = np.asarray(values, dtype=np.float64)
+    if t.ndim != 1 or t.shape != v.shape or t.size < 2:
+        raise ValueError("taus and values must be equal-length 1-D arrays (size >= 2)")
+    if closure == "flat":
+        return quantile_grid_mean(t, v)
+    if closure == "lognormal":
+        lo_fit = hi_fit = _lognormal_fit(t, v)
+    elif closure == "loglinear":
+        lo_fit = _lognormal_fit(t[:2], v[:2])
+        hi_fit = _lognormal_fit(t[-2:], v[-2:])
+    else:
+        raise ValueError(f"unknown closure {closure!r}; known: {CLOSURES}")
+    if lo_fit is None or hi_fit is None:
+        return math.nan
+    w = np.diff(t)
+    interior = float(np.sum(w * (v[:-1] + v[1:]) / 2.0))
+    lo_mu, lo_sigma = lo_fit
+    hi_mu, hi_sigma = hi_fit
+    lower = math.exp(lo_mu + 0.5 * lo_sigma**2) * float(
+        stats.norm.cdf(stats.norm.ppf(t[0]) - lo_sigma)
+    )
+    upper = math.exp(hi_mu + 0.5 * hi_sigma**2) * float(
+        stats.norm.sf(stats.norm.ppf(t[-1]) - hi_sigma)
+    )
+    return lower + interior + upper
+
+
+def grid_mean_under_closures(
+    taus: NDArray[np.float64], values: NDArray[np.float64]
+) -> dict[str, float]:
+    """Every closure in :data:`CLOSURES`, for one grid — the sensitivity, on demand.
+
+    The tail beyond the outermost levels is genuinely unidentified by the grid,
+    so a single number overstates what the data support. This is what lets the
+    paper state a range instead: ``docs/P3_TSFM_VARIANCE_AUDIT.md`` §3.2 puts
+    the panel medians of ``closed / flat`` at 1.11-1.20 (lognormal) against
+    1.09-1.10 (log-linear) and 1.21 (an assumption-free empirical closure,
+    computable only after the fact and therefore not here).
+
+    A closure that cannot be fitted reports NaN rather than being dropped: how
+    often that happens is itself part of the sensitivity.
+    """
+    return {name: tail_closed_grid_mean(taus, values, name) for name in CLOSURES}
 
 
 def rearrange_quantiles(values: NDArray[np.float64]) -> tuple[NDArray[np.float64], int]:
@@ -296,7 +445,7 @@ class ZeroShotRVModel:
             "zero_shot": True,
             "context_length": self.context_length,
             "input_scale": self.input_scale,
-            "variance_from": "mean_of_rv_quantile_grid",
+            "variance_from": VARIANCE_FROM,
             **self._identity(),
         }
 
@@ -362,17 +511,28 @@ class FittedTSFM:
         return out
 
     def predict(self, h: int) -> Distribution:
-        """``Normal(0, sqrt(vhat))`` over the return at ``t+h``; ``vhat`` = mean of the RV grid."""
+        """``Normal(0, sqrt(vhat))`` over the return at ``t+h``; ``vhat`` = mean of the RV grid.
+
+        The mean is taken under the lognormal tail closure (module docstring).
+        Where that closure cannot be fitted — a grid holding a zero — the flat
+        reading stands and ``tail_closure`` records ``"flat"`` for that origin,
+        so the fallback is countable rather than invisible.
+        """
         fc = self.rv_forecast(h)
         taus = np.asarray(fc.taus, dtype=np.float64)
         sorted_values, crossings = rearrange_quantiles(fc.values[h - 1])
         clipped = int(np.sum(sorted_values < 0.0))
         grid = np.maximum(sorted_values, 0.0)
-        vhat = quantile_grid_mean(taus, grid)
+        flat = quantile_grid_mean(taus, grid)
+        closed = tail_closed_grid_mean(taus, grid, "lognormal")
+        applied = "lognormal" if math.isfinite(closed) else "flat"
+        vhat = closed if applied == "lognormal" else flat
         self._meta[str(h)] = {
             "taus": [float(t) for t in taus],
             "values": [float(v) for v in grid],
             "mean": vhat,
+            "flat_tail_mean": flat,
+            "tail_closure": applied,
             "native_mean": None if fc.native_mean is None else float(fc.native_mean[h - 1]),
             "crossings_rearranged": crossings,
             "clipped_at_zero": clipped,

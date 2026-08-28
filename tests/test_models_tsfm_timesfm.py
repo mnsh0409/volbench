@@ -16,7 +16,7 @@ import pytest
 from tsfm_fakes import FakeBackend, realized_variance
 
 from volbench.models import TimesFM, TimesFMForecastOptions
-from volbench.models.tsfm_common import quantile_grid_mean, resolve_hf_revision
+from volbench.models.tsfm_common import resolve_hf_revision, tail_closed_grid_mean
 from volbench.models.tsfm_timesfm import DEFAULT_TIMESFM_CHECKPOINT, TimesFMBackend
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -167,11 +167,16 @@ class TestRealCheckpoint:
         assert meta["crossings_rearranged"] == 0  # fix_quantile_crossing did its job upstream
         assert meta["clipped_at_zero"] == 0  # infer_is_positive
         assert meta["native_mean"] > 0.0
-        assert grid[0] <= dist.variance() <= grid[-1]
         # sigma = sqrt(vhat); squaring it back is exact only to an ulp
         assert dist.variance() == pytest.approx(
-            quantile_grid_mean(np.asarray(meta["taus"]), grid), rel=1e-12
+            tail_closed_grid_mean(np.asarray(meta["taus"]), grid), rel=1e-12
         )
+        # The closure only re-expresses the two atoms, so the scored mean must
+        # still sit strictly above the flat-tailed one and inside the grid's
+        # own outer levels.
+        assert meta["tail_closure"] == "lognormal"
+        assert meta["flat_tail_mean"] < dist.variance()
+        assert grid[0] <= dist.variance() <= grid[-1]
         level = float(np.mean(rv[-22:]))
         assert 0.3 * level < dist.variance() < 3.0 * level
 

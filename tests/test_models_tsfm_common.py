@@ -2,10 +2,12 @@
 
 What is pinned here holds for every foundation-model adapter at once, because
 they all go through ``tsfm_common``: the context ends at the origin, the
-variance forecast is the mean of the model's RV quantile grid (the same mean
-the evaluator would take from a ``QuantileGrid``), the scored object is a
-``Normal(0, sqrt(vhat))`` over the return, ``update`` is exact context
-extension, ``input_scale`` round-trips, and a backtest cannot see the future.
+variance forecast is the mean of the model's RV quantile grid **under the
+lognormal tail closure** (``TestTailClosure``; the unclosed reading is still
+pinned equal to the one the evaluator would take from a ``QuantileGrid``), the
+scored object is a ``Normal(0, sqrt(vhat))`` over the return, ``update`` is
+exact context extension, ``input_scale`` round-trips, and a backtest cannot
+see the future.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import math
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 from tsfm_fakes import DEFAULT_TAUS, FAKE_SHA, FakeBackend, ScriptedBackend, realized_variance
 
 from volbench import evaluate as evaluate_module
@@ -24,14 +27,18 @@ from volbench.evaluate import SupportsUpdate, run_backtest
 from volbench.models import Chronos, Moirai, TimeGPT, TimesFM
 from volbench.models.base import FittedModel, ForecastModel
 from volbench.models.tsfm_common import (
+    CLOSURES,
     MIN_CONTEXT,
+    VARIANCE_FROM,
     FittedTSFM,
     TSFMBackend,
     ZeroShotRVModel,
     checkpoint_slug,
+    grid_mean_under_closures,
     quantile_grid_mean,
     rearrange_quantiles,
     resolve_hf_revision,
+    tail_closed_grid_mean,
     validated_rv,
 )
 from volbench.splitter import RollingOriginSplitter
@@ -72,6 +79,74 @@ class TestQuantileGridMean:
             quantile_grid_mean(np.asarray([0.5]), np.asarray([1.0]))
         with pytest.raises(ValueError):
             quantile_grid_mean(np.asarray([0.1, 0.9]), np.asarray([1.0, 2.0, 3.0]))
+
+
+class TestTailClosure:
+    """The fix of docs/P3_TSFM_VARIANCE_AUDIT.md: the mean was the right
+    functional, the flat tails were the bug."""
+
+    def test_flat_is_exactly_the_unclosed_grid_mean(self) -> None:
+        t = np.asarray(DEFAULT_TAUS)
+        v = np.sort(np.random.default_rng(0).lognormal(np.log(1e-4), 0.6, size=t.size))
+        assert tail_closed_grid_mean(t, v, "flat") == quantile_grid_mean(t, v)
+
+    @pytest.mark.parametrize("closure", ["lognormal", "loglinear"])
+    def test_closing_the_tails_of_a_right_skewed_grid_raises_the_mean(
+        self, closure: str
+    ) -> None:
+        """The direction is the whole finding: 20 % of the mass sits in two
+        atoms, and on a right-skewed law reading them as atoms understates."""
+        t = np.asarray(DEFAULT_TAUS)
+        v = np.exp(np.log(1e-4) + 0.6 * stats.norm.ppf(t))
+        assert tail_closed_grid_mean(t, v, closure) > quantile_grid_mean(t, v)
+
+    def test_on_an_exactly_lognormal_grid_the_closure_recovers_its_mean(self) -> None:
+        """The closure is exact where its assumption is exactly true, up to the
+        interior trapezoid — which is the only approximation left in it."""
+        mu, sigma = math.log(1e-4), 0.6
+        t = np.asarray(DEFAULT_TAUS)
+        v = np.exp(mu + sigma * stats.norm.ppf(t))
+        assert tail_closed_grid_mean(t, v, "lognormal") == pytest.approx(
+            math.exp(mu + 0.5 * sigma**2), rel=0.02
+        )
+
+    def test_a_grid_holding_a_zero_cannot_be_closed(self) -> None:
+        t = np.asarray(DEFAULT_TAUS)
+        v = np.asarray([0.0, 0.0, 0.4, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0])
+        assert math.isnan(tail_closed_grid_mean(t, v, "lognormal"))
+        assert math.isfinite(tail_closed_grid_mean(t, v, "flat"))
+
+    def test_a_degenerate_grid_cannot_be_closed_either(self) -> None:
+        t = np.asarray(DEFAULT_TAUS)
+        assert math.isnan(tail_closed_grid_mean(t, np.full(t.size, 3.0), "lognormal"))
+
+    def test_the_sensitivity_reports_every_closure_and_names_them(self) -> None:
+        t = np.asarray(DEFAULT_TAUS)
+        v = np.exp(np.log(1e-4) + 0.6 * stats.norm.ppf(t))
+        out = grid_mean_under_closures(t, v)
+        assert tuple(out) == CLOSURES == ("flat", "lognormal", "loglinear")
+        assert out["flat"] < out["loglinear"]
+        assert out["flat"] < out["lognormal"]
+
+    def test_an_unknown_closure_is_refused(self) -> None:
+        t = np.asarray(DEFAULT_TAUS)
+        with pytest.raises(ValueError, match="unknown closure"):
+            tail_closed_grid_mean(t, np.arange(1.0, 10.0), "student")
+
+    def test_rejects_bad_shapes_like_the_unclosed_mean(self) -> None:
+        with pytest.raises(ValueError):
+            tail_closed_grid_mean(np.asarray([0.5]), np.asarray([1.0]))
+
+    def test_the_closure_is_named_in_spec_and_therefore_in_the_config_hash(self) -> None:
+        """The label must name the estimator: leaving it at
+        ``mean_of_rv_quantile_grid`` while changing how that mean is computed
+        would make every sidecar a false statement about its own numbers, and
+        the store would serve pre-fix fragments for post-fix configs."""
+        spec = _model(Chronos).spec()
+        assert spec["variance_from"] == VARIANCE_FROM == (
+            "lognormal_tail_closed_mean_of_rv_quantile_grid"
+        )
+        assert "tail_closed" in spec["variance_from"]
 
 
 class TestRearrangeQuantiles:
@@ -220,7 +295,7 @@ class TestContextConstruction:
 
 
 class TestPredict:
-    def test_returns_normal_over_the_return_with_the_grid_mean_as_variance(self) -> None:
+    def test_returns_normal_over_the_return_with_the_tail_closed_grid_mean(self) -> None:
         rv = realized_variance(300)
         backend = FakeBackend()
         fitted = Chronos(backend=backend, input_scale=1.0).fit(rv)
@@ -228,11 +303,14 @@ class TestPredict:
         assert isinstance(dist, Normal)
         assert dist.mu == 0.0
         expected_grid = backend.forecast(fitted.context, 1).values[0]
-        vhat = quantile_grid_mean(np.asarray(DEFAULT_TAUS), expected_grid)
+        taus = np.asarray(DEFAULT_TAUS)
+        vhat = tail_closed_grid_mean(taus, expected_grid)
         assert dist.variance() == pytest.approx(vhat, rel=1e-12)
         assert dist.sigma == math.sqrt(vhat)
         # daily units, never annualized
         assert 1e-6 < vhat < 1e-2
+        # and it is strictly the flat reading plus the closed tails
+        assert vhat > quantile_grid_mean(taus, expected_grid)
 
     def test_step_h_uses_row_h_minus_one(self) -> None:
         rv = realized_variance(300)
@@ -241,7 +319,7 @@ class TestPredict:
         v1, v3 = fitted.predict(1).variance(), fitted.predict(3).variance()
         rows = backend.forecast(fitted.context, 3).values
         taus = np.asarray(DEFAULT_TAUS)
-        assert v3 == pytest.approx(quantile_grid_mean(taus, rows[2]), rel=1e-12)
+        assert v3 == pytest.approx(tail_closed_grid_mean(taus, rows[2]), rel=1e-12)
         assert v3 == pytest.approx(v1 * 1.03 / 1.01, rel=1e-12)
         with pytest.raises(ValueError, match="h must be >= 1"):
             fitted.predict(0)
@@ -274,7 +352,11 @@ class TestPredict:
         assert meta["clipped_at_zero"] == 2
         grid = np.asarray(meta["values"])
         assert grid.tolist() == [0.0, 0.0, 0.4, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0]
+        # A clipped zero is exactly the state no lognormal can describe, so
+        # this origin keeps the flat reading — and says so.
+        assert meta["tail_closure"] == "flat"
         assert dist.variance() == pytest.approx(quantile_grid_mean(np.asarray(DEFAULT_TAUS), grid))
+        assert dist.variance() == meta["flat_tail_mean"]
 
     def test_non_positive_mean_is_a_predict_error_not_a_forecast(self) -> None:
         rows = np.asarray([[-1.0] * 9])

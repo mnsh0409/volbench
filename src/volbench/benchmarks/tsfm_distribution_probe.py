@@ -24,12 +24,15 @@ so "how far apart are they" is only a question once an axis is named:
 - **RV axis.** What the reduction throws away is a whole predictive law over
   RV, replaced by its own mean. :func:`grid_law_moments` gives the four moments
   of that law — the mean is exactly the ``vhat`` the adapter scores.
-- **RV axis, tail closure.** The grid's mean is computed with *flat tails*
+- **RV axis, tail closure.** The grid's mean *was* computed with flat tails
   outside the outermost level, which puts a point mass of ``taus[0]`` at
   ``values[0]`` and ``1 - taus[-1]`` at ``values[-1]``. For a right-skewed RV
-  law that understates the mean (D-014's family of bias; docs/design.md). The
-  size of the understatement is not identified by the grid alone, so
-  :func:`tail_closed_mean` reports it under a named closure and the caller
+  law that understates the mean (D-014's family of bias; docs/design.md).
+  Since the fix the adapter closes that tail lognormally, and
+  :func:`tail_closed_mean` is the adapter's own
+  :func:`volbench.models.tsfm_common.tail_closed_grid_mean` — imported, not
+  restated, so this probe measures the shipped closure. The size of the
+  understatement is still not identified by the grid alone, so the caller
   reports the range across closures rather than one number.
 - **Return axis.** The distributional shape the adapter drops shows up as a
   *scale mixture*: ``r = sqrt(V) Z`` with ``V`` the grid law and ``Z``
@@ -65,6 +68,7 @@ from scipy import stats  # type: ignore[import-untyped]
 
 from volbench.benchmarks.grid_primary import ARM, asset_data, model_configs
 from volbench.data.panel import build_panel
+from volbench.models.tsfm_common import tail_closed_grid_mean as tail_closed_mean
 from volbench.results import ResultsStore
 from volbench.runner import AssetData, ModelConfig
 
@@ -179,76 +183,6 @@ def grid_law_moments(taus: NDArray[np.float64], values: NDArray[np.float64]) -> 
 
 
 # --------------------------------------------------------------------------
-# tail closures: what the flat tails cost the mean
-# --------------------------------------------------------------------------
-
-
-def _lognormal_fit(
-    taus: NDArray[np.float64], values: NDArray[np.float64]
-) -> tuple[float, float] | None:
-    """``(mu, sigma)`` of a lognormal fitted to the grid by OLS in log-z space.
-
-    ``log q_tau = mu + sigma Phi^{-1}(tau)``. Returns ``None`` when the grid
-    holds a non-positive value (a clipped quantile) or is degenerate, since a
-    lognormal cannot describe either.
-    """
-    if np.any(values <= 0.0) or float(values[-1]) <= float(values[0]):
-        return None
-    z = stats.norm.ppf(taus)
-    y = np.log(values)
-    sigma = float(np.sum((z - z.mean()) * (y - y.mean())) / np.sum((z - z.mean()) ** 2))
-    if not (math.isfinite(sigma) and sigma > 0.0):
-        return None
-    return float(y.mean() - sigma * z.mean()), sigma
-
-
-def tail_closed_mean(
-    taus: NDArray[np.float64], values: NDArray[np.float64], closure: str = "lognormal"
-) -> float:
-    """The grid's mean with the flat tails replaced by ``closure``'s own tails.
-
-    The interior of the grid is left exactly as the checkpoint emitted it; only
-    the two closures — the mass below ``taus[0]`` and above ``taus[-1]`` — are
-    re-expressed. Two are implemented, and the honest reading is the range
-    between them rather than either alone:
-
-    ``"lognormal"``
-        A lognormal fitted to the whole grid (:func:`_lognormal_fit`), whose
-        partial expectations are closed form: the mass above ``tau`` integrates
-        to ``exp(mu + sigma^2/2) (1 - Phi(z_tau - sigma))``.
-    ``"loglinear"``
-        The same shape fitted to the outermost *pair* of levels at each end,
-        so the extrapolated tail follows the grid's own outer spacing rather
-        than its global shape. Heavier whenever the grid fans out at the edges.
-
-    Returns NaN when the closure cannot be fitted — a clipped (zero) quantile
-    is the case that occurs in practice.
-    """
-    t = np.asarray(taus, dtype=np.float64)
-    v = np.asarray(values, dtype=np.float64)
-    if closure == "lognormal":
-        lo_fit = hi_fit = _lognormal_fit(t, v)
-    elif closure == "loglinear":
-        lo_fit = _lognormal_fit(t[:2], v[:2])
-        hi_fit = _lognormal_fit(t[-2:], v[-2:])
-    else:
-        raise ValueError(f"unknown closure {closure!r}")
-    if lo_fit is None or hi_fit is None:
-        return math.nan
-    a, b = v[:-1], v[1:]
-    w = np.diff(t)
-    interior = float(np.sum(w * (a + b) / 2.0))
-    lo_mu, lo_sigma = lo_fit
-    hi_mu, hi_sigma = hi_fit
-    # E[X 1{X < q}] = exp(mu + s^2/2) Phi(z_q - s); the upper tail is its complement.
-    lo_total = math.exp(lo_mu + 0.5 * lo_sigma**2)
-    hi_total = math.exp(hi_mu + 0.5 * hi_sigma**2)
-    lower = lo_total * float(stats.norm.cdf(stats.norm.ppf(t[0]) - lo_sigma))
-    upper = hi_total * float(stats.norm.sf(stats.norm.ppf(t[-1]) - hi_sigma))
-    return lower + interior + upper
-
-
-# --------------------------------------------------------------------------
 # the return axis: the scale mixture the reduction replaces with a Normal
 # --------------------------------------------------------------------------
 
@@ -344,18 +278,26 @@ def _record(
     taus = np.asarray(meta["taus"], dtype=np.float64)
     grid = np.asarray(meta["values"], dtype=np.float64)  # post-repair: sorted, clipped
     moments = grid_law_moments(taus, grid)
+    # ``vhat`` is what was scored; ``flat`` is the reading that shipped before
+    # the tail closure landed. The moments below are the flat-tailed
+    # interpolant law's throughout (that is what ``grid_law_moments``
+    # documents), so the CV and the mixture kurtosis stay comparable across
+    # the fix rather than moving for two reasons at once.
     vhat = float(meta["mean"])
+    flat = float(meta["flat_tail_mean"])
     row: dict[str, Any] = {
         "asset": asset,
         "model": label,
         "origin": origin,
         "n_levels": int(taus.size),
         "vhat": vhat,
+        "flat_tail_mean": flat,
+        "tail_closure": str(meta["tail_closure"]),
         "grid_variance": moments.variance,
         "grid_skewness": moments.skewness,
         "grid_excess_kurtosis": moments.excess_kurtosis,
-        "grid_cv": math.sqrt(moments.variance) / vhat if vhat > 0 else math.nan,
-        "return_excess_kurtosis": mixture_excess_kurtosis(moments.variance, vhat),
+        "grid_cv": math.sqrt(moments.variance) / flat if flat > 0 else math.nan,
+        "return_excess_kurtosis": mixture_excess_kurtosis(moments.variance, flat),
         "crossings_rearranged": int(meta["crossings_rearranged"]),
         "clipped_at_zero": int(meta["clipped_at_zero"]),
         "native_mean": meta["native_mean"],
