@@ -185,6 +185,14 @@ as the checkpoint emitted it; only the two flat closures are re-expressed.
 | `loglinear` | the same shape fitted to the **outermost pair** of levels at each end, so the tail follows the grid's own edge spacing | heavier when the grid fans out; more local, noisier |
 | `empirical` | **no distributional assumption**: the atoms are replaced by the realized `proxy_var`'s own conditional means over exceedances of q<sub>0.1</sub> / q<sub>0.9</sub> | valid only if the grid is calibrated; absorbs any upper-tail miscalibration, so it is an **upper** reading |
 
+**The empirical closure is a diagnostic, not a candidate fix.** It pools realized
+`proxy_var` over the whole evaluation sample, so it reads data after the origin
+it would correct. Nothing it produces is fed to a model or to a forecast — it
+exists only to bound the other two closures without assuming a shape — and it
+could not be implemented at forecast time. The lognormal and log-linear closures
+use nothing but the origin's own grid and are implementable; those are the two
+in the per-asset table.
+
 ### 3.1 `correct_variance / current_variance`, per TSFM per asset
 
 Lognormal closure. Median, IQR, min, max over the 200 origins of each cell.
