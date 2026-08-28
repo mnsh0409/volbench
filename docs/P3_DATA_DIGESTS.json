@@ -1,0 +1,182 @@
+{
+  "arm": "headline",
+  "assets": [
+    {
+      "asset": "BTC-USD",
+      "fit_series_sha256": "f777abda79562afa32d1ce7174bb0d96150a784cfd8b10221bf2e99955370eb1",
+      "invalid_target_policy": "compact",
+      "n": 3291,
+      "panel_end": "2026-08-21",
+      "panel_start": "2017-08-18",
+      "proxy": {
+        "name": "realized_variance",
+        "sha256": "f777abda79562afa32d1ce7174bb0d96150a784cfd8b10221bf2e99955370eb1"
+      },
+      "raw_sha256": null,
+      "role": "crypto",
+      "series_sha256": "8a9ae301ab41bc215a0a0f45b40c23a06ef88855d7b35445e7cbb38a109f8e83",
+      "source": "binance"
+    },
+    {
+      "asset": "CAC",
+      "fit_series_sha256": "a3a99e253cef7571d5cb774e647be1f92bd84e01b7550e20a7933dad9e77493f",
+      "invalid_target_policy": "compact",
+      "n": 5538,
+      "panel_end": "2026-08-21",
+      "panel_start": "2005-01-04",
+      "proxy": {
+        "name": "overnight_plus_range",
+        "sha256": "a3a99e253cef7571d5cb774e647be1f92bd84e01b7550e20a7933dad9e77493f"
+      },
+      "raw_sha256": "d61b13746a2e28c03b42bede3ad1d5bd14606151ca2fda2a44c9926e9ef99eba",
+      "role": "index",
+      "series_sha256": "1488bdbcc8825a8848af730756b311c91e27677cf3458d6417e28f59abe559ea",
+      "source": "stooq"
+    },
+    {
+      "asset": "DAX",
+      "fit_series_sha256": "e84d8cc8f091adbf8f509826d727edc4b66c507b7f7965acd15904fffde5d906",
+      "invalid_target_policy": "compact",
+      "n": 5496,
+      "panel_end": "2026-08-21",
+      "panel_start": "2005-01-04",
+      "proxy": {
+        "name": "overnight_plus_range",
+        "sha256": "e84d8cc8f091adbf8f509826d727edc4b66c507b7f7965acd15904fffde5d906"
+      },
+      "raw_sha256": "ef6cf1c3619c8be4cb8a438a243d42cc81611a6d212261d66af26290d62dd23e",
+      "role": "index",
+      "series_sha256": "70132615941203663805e1d308168f0e25f17eaf43bc3913089402f16ca6ac32",
+      "source": "stooq"
+    },
+    {
+      "asset": "DIA",
+      "fit_series_sha256": "4bd446d89e68ab02813800c87c89e57ccbfeb229f880672068b4db3a43f582f0",
+      "invalid_target_policy": "compact",
+      "n": 5404,
+      "panel_end": "2026-08-21",
+      "panel_start": "2005-02-28",
+      "proxy": {
+        "name": "overnight_plus_range",
+        "sha256": "4bd446d89e68ab02813800c87c89e57ccbfeb229f880672068b4db3a43f582f0"
+      },
+      "raw_sha256": "3f3589c9073f59a560e34eacb96e0b96445e3b7ca3a7aeb3e76e675634aef391",
+      "role": "etf_proxy",
+      "series_sha256": "ee5a94dd04e2407ea3a09656c045b8bf0a2053e517439216d747572b797a9d4f",
+      "source": "stooq"
+    },
+    {
+      "asset": "ETH-USD",
+      "fit_series_sha256": "922a1cdfaceb81350846ccc233e61a9940ebb38768f7b0b1bb9cbbe66c9a2fee",
+      "invalid_target_policy": "compact",
+      "n": 3291,
+      "panel_end": "2026-08-21",
+      "panel_start": "2017-08-18",
+      "proxy": {
+        "name": "realized_variance",
+        "sha256": "922a1cdfaceb81350846ccc233e61a9940ebb38768f7b0b1bb9cbbe66c9a2fee"
+      },
+      "raw_sha256": null,
+      "role": "crypto",
+      "series_sha256": "336b608fb8f3f2e09ff9f06d06b32860b240de9937f4cb2e147fad9fdea5d44f",
+      "source": "binance"
+    },
+    {
+      "asset": "HSI",
+      "fit_series_sha256": "a8e4288146fd9b54f39c30bacddb7cf5f7e7baa330fd39349987c84fca34b6c2",
+      "invalid_target_policy": "compact",
+      "n": 5328,
+      "panel_end": "2026-08-21",
+      "panel_start": "2005-01-04",
+      "proxy": {
+        "name": "overnight_plus_range",
+        "sha256": "a8e4288146fd9b54f39c30bacddb7cf5f7e7baa330fd39349987c84fca34b6c2"
+      },
+      "raw_sha256": "5827153c3590f0edfd8c51307d685f5fdca41842ee8db2e6151df369c4a9978f",
+      "role": "index",
+      "series_sha256": "4b040f0577b54741317f4d184297127416790e5b9c1fb564ef767daa8d197e15",
+      "source": "stooq"
+    },
+    {
+      "asset": "KOSPI",
+      "fit_series_sha256": "acace93755ffc50f465b816f03f09f32a2a0162e7ce98695a8d78755c8dc1001",
+      "invalid_target_policy": "compact",
+      "n": 5337,
+      "panel_end": "2026-08-21",
+      "panel_start": "2005-01-04",
+      "proxy": {
+        "name": "overnight_plus_range",
+        "sha256": "acace93755ffc50f465b816f03f09f32a2a0162e7ce98695a8d78755c8dc1001"
+      },
+      "raw_sha256": "ee5bae9919b2e10d5898f251b2eef7b10de63ba64d99eb910cd00c31cd28a736",
+      "role": "index",
+      "series_sha256": "b60116c5ee0c71f165022b8521aacc3e7f407047c8e1e6652d9ac9f3ae1bd22b",
+      "source": "stooq"
+    },
+    {
+      "asset": "NDX",
+      "fit_series_sha256": "a3b85cbc894e826af0ec10d19930f9df9bbcb262f22afc278f69900d9155bf89",
+      "invalid_target_policy": "compact",
+      "n": 5442,
+      "panel_end": "2026-08-21",
+      "panel_start": "2005-01-04",
+      "proxy": {
+        "name": "overnight_plus_range",
+        "sha256": "a3b85cbc894e826af0ec10d19930f9df9bbcb262f22afc278f69900d9155bf89"
+      },
+      "raw_sha256": "14b66da8a786121f9ba47b9798917b507ead9233bb654f18e958fb333a38d74c",
+      "role": "index",
+      "series_sha256": "461ef9399f0914102c3f81c081b1069edac7b899c4625d2811ac7d98ef20b7e2",
+      "source": "stooq"
+    },
+    {
+      "asset": "NKX",
+      "fit_series_sha256": "5ac574b09730d3514d574ce1fc56e6787dea88d653e457cb04a343021090de2d",
+      "invalid_target_policy": "compact",
+      "n": 5295,
+      "panel_end": "2026-08-21",
+      "panel_start": "2005-01-05",
+      "proxy": {
+        "name": "overnight_plus_range",
+        "sha256": "5ac574b09730d3514d574ce1fc56e6787dea88d653e457cb04a343021090de2d"
+      },
+      "raw_sha256": "f88e40b277974e39d91c6f8a9eca239c361d5ba3ebe37d3939e3a5149ae76ff5",
+      "role": "index",
+      "series_sha256": "2fa1a4569b026ce642219fcaadd55b74a8e0b6b63df470137bf7c93bf8753fdb",
+      "source": "stooq"
+    },
+    {
+      "asset": "SPY",
+      "fit_series_sha256": "2253e46da0c6acba3e0499f271b4343827aae79b3f55027d7575705ed19301d5",
+      "invalid_target_policy": "compact",
+      "n": 5404,
+      "panel_end": "2026-08-21",
+      "panel_start": "2005-02-28",
+      "proxy": {
+        "name": "overnight_plus_range",
+        "sha256": "2253e46da0c6acba3e0499f271b4343827aae79b3f55027d7575705ed19301d5"
+      },
+      "raw_sha256": "ba1fa78f5251279432b7e45174d8d340fcfdc91cea153a2a5f05730da31bacc3",
+      "role": "etf_proxy",
+      "series_sha256": "8126fc1d2f59198e0333e2a85530c4ed2a84450e56ba81fc9fe2d8d87c8f0da2",
+      "source": "stooq"
+    },
+    {
+      "asset": "TWSE",
+      "fit_series_sha256": "818335dee1d4a66f8d5cb95bf6b17f56cfb6357671d292076a1fd635f93795bb",
+      "invalid_target_policy": "compact",
+      "n": 5301,
+      "panel_end": "2026-08-21",
+      "panel_start": "2005-01-04",
+      "proxy": {
+        "name": "overnight_plus_range",
+        "sha256": "818335dee1d4a66f8d5cb95bf6b17f56cfb6357671d292076a1fd635f93795bb"
+      },
+      "raw_sha256": "93ec6e3924f56df2065a1cdcc931eda22ae3fd2367d35754400c1087e6d61a33",
+      "role": "index",
+      "series_sha256": "b69bf63bc9e469ad1bd424ef103b41c30d0b73b6171546365645228df7fb9ab7",
+      "source": "stooq"
+    }
+  ],
+  "what": "content digests of the primary grid's inputs; see the module docstring"
+}

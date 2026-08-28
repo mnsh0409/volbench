@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import platform
+import sys
 from typing import Any, Final
 
 __all__ = [
@@ -44,6 +46,7 @@ __all__ = [
     "determinism_env",
     "environment_report",
     "environment_spec",
+    "interpreter_info",
     "kernel_signature",
     "thread_pin",
 ]
@@ -194,6 +197,29 @@ def _observed_thread_pools() -> list[dict[str, Any]] | None:
     return [{key: pool[key] for key in keep if key in pool} for pool in pools]
 
 
+def interpreter_info() -> dict[str, Any]:
+    """Which Python ran this, for the **manifest** — reported, never hashed.
+
+    A run that records no interpreter forces anyone checking it to establish
+    one indirectly (docs/P3_ANALYSIS_VALIDITY.md had to do it three ways), and
+    an indirect answer is not evidence. It stays out of
+    :func:`environment_spec` deliberately: the version is not known to move a
+    number here — the package supports 3.11-3.13 and CI runs all three — so
+    hashing it would split the cache three ways for a claim nothing has
+    measured. It is recorded so a disagreement between two runs can be
+    attributed rather than guessed at.
+
+    ``executable`` is a path and therefore says which *venv*, which is what a
+    reader on the same machine actually needs; it never reaches a config hash,
+    where :func:`volbench.results._canon` refuses paths outright.
+    """
+    return {
+        "python": platform.python_version(),
+        "implementation": platform.python_implementation(),
+        "executable": sys.executable,
+    }
+
+
 def environment_spec() -> dict[str, Any]:
     """The machine settings that enter the **config hash** (D-032).
 
@@ -210,13 +236,14 @@ def environment_report() -> dict[str, Any]:
     """The fuller machine record for a **run manifest** — reported, not hashed.
 
     The manifest may say more than the hash, and should: a reader diagnosing
-    two runs that disagree needs the BLAS build and the pins as they stood,
-    not only the one integer that split the cache.
+    two runs that disagree needs the BLAS build, the interpreter and the pins
+    as they stood, not only the one integer that split the cache.
     """
     report: dict[str, Any] = {
         "blas_threads": thread_pin(),
         "thread_pin_explicit": is_pinned(),
         "kernel_signature": kernel_signature(),
+        "interpreter": interpreter_info(),
         "cpu_count": os.cpu_count(),
         "env": {key: value for key, value in sorted(determinism_env().items())},
         "blas": blas_info(),
