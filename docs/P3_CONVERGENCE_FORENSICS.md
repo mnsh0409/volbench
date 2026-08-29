@@ -1,8 +1,8 @@
 # P3 — convergence forensics: the 38 EWMA fallbacks
 
 **What this is.** Every one of the primary grid's 38 fallback fits, described
-from the optimizer's own terminal state rather than from its exit flag. Seven
-tables (T1–T8) and the five questions J2 asks of them.
+from the optimizer's own terminal state rather than from its exit flag. Eight
+tables (T1–T8), and the five questions J2 asks of them.
 
 **Reported, not interpreted.** No model is ranked and no fallback is read as
 evidence about a forecast. Where this document says "at a bound" it means a
@@ -18,6 +18,13 @@ shown so the claim can be checked rather than believed.
 | Interpreter | CPython 3.11.5, `.venv` (docs/P3_ANALYSIS_ASSUMPTIONS.md §8) |
 | Environment | `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL AVX512_SPR"` |
 | Read first | `docs/P3_ANALYSIS_ASSUMPTIONS.md` (J1) — §5 for the per-fit view of `fit_status`, §7 for the crisis windows |
+
+`manifest_fix.json` is the current manifest: `docs/P3_MODEL_DEFECT_FIXES.md` §3
+re-ran 44 cells after the LightGBM and TSFM fixes, and
+`docs/P3_GRID_manifest.json` describes the grid before them. **It makes no
+difference to this document**: `garch11`, `garch11_t` and `gjr` are among the
+99 configs-by-asset whose hashes did not move, so their fragments are
+byte-identical between the two manifests and the 38 are the same 38 either way.
 
 ---
 
@@ -38,7 +45,8 @@ scheduled fit, converged or not. It is not in `spec()`, so it is in no config
 hash; it is read by no code path that produces a number; `update` carries it
 forward unchanged, exactly as it does `detail`, because it describes the
 *scheduled* fit. `tests/test_models_garch.py::TestTerminalFit` pins all of
-that, including that `fit_status` is byte-identical to what it was.
+that, `fit_status`'s exact spelling included; that it is byte-identical over
+the real grid is §0's 7,101-of-7,101 check below.
 
 **Then the grid's GARCH-family fits were re-run to read it back** — all 7,101,
 at the grid's own scheduled origins read out of the store's `fit_origin`
@@ -265,8 +273,8 @@ grid's refit cadence: they are DIA refits number 18, 19 and 20 of 234, and they
 span 2008-07-23 → 2008-09-22, 61 calendar days. Six of DIA's seven fallbacks
 fall inside that span. Each of the three origins has exactly two of the three
 specifications failing on it, and each of the three specifications fails
-somewhere inside it. The seventh fallback (`garch11` at 5056, 2025-04-03) is
-17 years away and is the only DIA fallback outside the 2008 span.
+somewhere inside it. The seventh fallback (`garch11` at 5056, 2025-04-03)
+is 16.5 years later and is the only DIA fallback outside the 2008 span.
 
 **Which way this points, under the rule the question sets.** Overlapping
 origins across specifications point at the data; disjoint origins point at the
@@ -316,12 +324,13 @@ The 14 are two runs, not one (T5):
   bound (1.8e-12) and stationarity at 1.000000.
 - **Thirteen of the last fifteen refits**, origins 5014 → 5308
   (2025-05-16 → 2026-07-27). The two converged fits inside that run (5056 and
-  5224) have the *same* structure as the thirteen that failed — γ = −α to
-  1e-9, α+β above 1.03, stationarity 0.993 and 1.000000 — so a converged and a
-  fallback fit in this run are not separable by the parameter vector alone.
+  5224) have the *same* structure as the thirteen that failed — α+γ at
+  6.2e-9 and 4.3e-10, α+β at 1.0309 and 1.0428, stationarity at 0.9930 and
+  1.000000 — so within this run a converged and a fallback fit are not
+  separated by the parameter vector.
   Every fit from 4993 onward has the same window maximum, |r| = 0.14183, and
-  window kurtosis rises monotonically across the run from 15.7 to 20.7 against
-  a clean-fit median of 5.29.
+  window kurtosis runs 15.72 (origin 5014) to 20.65 (origin 5266) across the
+  run — rising but not monotonically — against a clean-fit median of 5.29.
 
 ### T4 — HSI `gjr`: the 14 against the 216
 
@@ -393,10 +402,10 @@ The measurable differences, counted:
   31.86 (median 5.10). The two exceptions are origins 2494 and 2578 (2024),
   where ETH reads 7.80 and 8.12 against BTC's 5.50 and 5.55.
 - **Maximum absolute return.** ETH's window maximum is larger at every one of
-  the 15, by between 1.8× (0.17588 vs 0.09768, origin 2494) and 1.17×
-  (0.59053 vs 0.50261, origin 940).
-- **Window standard deviation.** ETH's is larger at all 15 (e.g. 0.0594 vs
-  0.0483 at origin 499).
+  the 15, by a factor between **1.106** (0.23980 vs 0.21688, origin 541) and
+  **1.801** (0.17588 vs 0.09768, origin 2494).
+- **Window standard deviation.** ETH's is larger at all 15, by a factor
+  between 1.101 and 1.374 (e.g. 0.0594 vs 0.0483 at origin 499).
 - **α+β of the nearest converged fit.** For BTC, 12 of the 15 fallbacks have
   their nearest converged fit at origin 709 or 751 — the run 499 → 772 is 12
   fallbacks out of 14 consecutive refits — and that fit's α+β is 1.000000000.
@@ -466,8 +475,8 @@ measurement.
 The origin date is the information cutoff; the fit window is the 500 trading
 days ending on it. Nothing here tags windows — only origins — so a fallback at
 a `calm` origin can still rest on a window containing a crisis. DIA at origin
-898 illustrates the reverse: its origin is 22 days inside `gfc` while its
-window opens in 2006.
+898 illustrates the reverse: its origin is three weeks after `gfc` opens while
+its window opens in 2006.
 
 ---
 
