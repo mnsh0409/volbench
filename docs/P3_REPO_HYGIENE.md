@@ -136,6 +136,18 @@ worked around. Two things would have to happen before it can be committed:
 The file is now untracked-and-visible rather than untracked-and-hidden, which is
 the part of the task that was safe to finish.
 
+**Both follow-ups are now partly done — see docs/P3_ORDER_STATISTICS.md.**
+`max_abs_return` is tagged `order_statistic` in
+`convergence_forensics.COLUMN_POLICY` and every emitting path refuses it, so the
+first blocker is closed: the file under `docs/` no longer carries the column,
+and the full frame lives at `data/grid_primary/convergence_fits_full.parquet`.
+The second blocker stands unchanged. That document also records what this
+section did not: the same values were **already committed in markdown**, in
+three tables of docs/P3_CONVERGENCE_FORENSICS.md and three of
+docs/P3_ANALYSIS_VALIDITY.md, plus four raw index prices in
+docs/PANEL_REPORT.md. Refusing the parquet while shipping its contents in prose
+was incoherent, and this section did not catch it.
+
 **One live consequence, stated so it is not a surprise:** until `max_abs_return`
 is dealt with, a `git add -A` in this repository *will* stage
 `docs/P3_CONVERGENCE_FITS.parquet`, and the licensing guard will fail with

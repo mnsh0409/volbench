@@ -30,22 +30,34 @@ strictly positive and diverges as either approaches zero.
 
 ### 1.1 Per asset
 
-`proxy_min` is the smallest **strictly positive** realized target; `forecast_min`
-is the smallest strictly positive variance forecast over all 13 models.
+`proxy_min` is the smallest **strictly positive** realized target, reported as
+its **ratio to that asset's median positive target** rather than as itself: a
+minimum is an order statistic — one realised value of a licensed-derived series,
+verbatim — and what this column is read for is how far below the asset's typical
+day the smallest positive target sits, which the ratio says exactly
+(docs/P3_ORDER_STATISTICS.md). `forecast_min` is the smallest strictly positive
+variance forecast over all 13 models and is a level, because a forecast is the
+study's own output rather than an observation of the series, and no model here
+emits a raw observation — `naive`'s forecast is a trailing RMS, `ewma`'s an
+exponentially weighted mean, the rest are fitted.
 
-| asset | targets | proxy min (>0) | proxy = 0 | proxy < 0 | proxy NaN | forecast min | forecast <= 0 | forecast NaN |
+| asset | targets | proxy min / median | proxy = 0 | proxy < 0 | proxy NaN | forecast min | forecast <= 0 | forecast NaN |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| BTC-USD | 2,791 | 8.260e-06 | 0 | 0 | 0 | 2.596e-05 | 0 | 0 |
-| CAC | 5,038 | **2.431e-10** | 0 | 0 | 28 | 8.289e-06 | 0 | 0 |
-| DAX | 4,996 | 5.806e-08 | 0 | 0 | 0 | 9.058e-06 | 0 | 0 |
-| DIA | 4,904 | 5.113e-07 | 0 | 0 | 0 | 6.584e-06 | 0 | 0 |
-| ETH-USD | 2,791 | 1.306e-05 | 0 | 0 | 0 | 4.344e-05 | 0 | 0 |
-| HSI | 4,828 | 1.179e-08 | **12** | 0 | 1 | 9.129e-06 | 0 | 0 |
-| KOSPI | 4,837 | 2.070e-07 | 0 | 0 | 0 | 1.710e-05 | 0 | 0 |
-| NDX | 4,942 | 1.572e-07 | 0 | 0 | 0 | 1.255e-05 | 0 | 0 |
-| NKX | 4,795 | **6.716e-11** | **1** | 0 | 0 | 5.764e-06 | 0 | 168 |
-| SPY | 4,904 | 1.124e-06 | 0 | 0 | 0 | 6.469e-06 | 0 | 0 |
-| TWSE | 4,801 | **4.401e-11** | 0 | 0 | 80 | 6.491e-06 | 0 | 0 |
+| BTC-USD | 2,791 | 1.235e-02 | 0 | 0 | 0 | 2.596e-05 | 0 | 0 |
+| CAC | 5,038 | **3.479e-06** | 0 | 0 | 28 | 8.289e-06 | 0 | 0 |
+| DAX | 4,996 | 8.367e-04 | 0 | 0 | 0 | 9.058e-06 | 0 | 0 |
+| DIA | 4,904 | 1.161e-02 | 0 | 0 | 0 | 6.584e-06 | 0 | 0 |
+| ETH-USD | 2,791 | 1.137e-02 | 0 | 0 | 0 | 4.344e-05 | 0 | 0 |
+| HSI | 4,828 | 1.379e-04 | **12** | 0 | 1 | 9.129e-06 | 0 | 0 |
+| KOSPI | 4,837 | 3.190e-03 | 0 | 0 | 0 | 1.710e-05 | 0 | 0 |
+| NDX | 4,942 | 1.247e-03 | 0 | 0 | 0 | 1.255e-05 | 0 | 0 |
+| NKX | 4,795 | **3.491e-07** | **1** | 0 | 0 | 5.764e-06 | 0 | 168 |
+| SPY | 4,904 | 1.446e-02 | 0 | 0 | 0 | 6.469e-06 | 0 | 0 |
+| TWSE | 4,801 | **9.465e-07** | 0 | 0 | 80 | 6.491e-06 | 0 | 0 |
+
+The three bolded assets are the ones whose smallest positive target sits six to
+seven orders of magnitude below their own median — the divergence risk §1.4
+measures. The denominators are medians over 3,291 to 5,510 positive targets.
 
 The proxy is a property of the asset, not of the model: the target column is
 identical across each asset's 13 cells (`proxy_distinct_series = 1` for all
@@ -100,18 +112,26 @@ a target; it is the day that causes §2's `InsufficientHistoryError`).
 They are **not** days with no price movement. Both terms of the primary target
 vanish for a structural reason, on days with large close-to-close moves:
 
-| asset | date | prev C | O | H | L | C | ln(C/C_-1) | target | Parkinson on the same bar |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| HSI | 2018-11-02 | 25416.00 | 25416.00 | 26486.35 | 25416.00 | 26486.35 | **+4.13%** | **0** | 6.137e-04 |
-| HSI | 2023-08-25 | 18212.17 | 18212.17 | 18212.17 | 17956.38 | 17956.38 | **-1.41%** | **0** | 7.216e-05 |
-| NKX | 2005-11-01 | 13606.50 | 13606.50 | 13867.86 | 13606.50 | 13867.86 | **+1.90%** | **0** | 1.306e-04 |
+The bars are described by their **shape** and by ratios to the asset's own
+median day. The prices themselves are not reproduced, nor is the day's return:
+five quoted prices and a quoted return are single realised observations of a
+series Stooq forbids redistributing, and the argument here is entirely about
+geometry and magnitude *relative to* a typical day.
+
+| asset | date | stale open (O = C_-1) | monotone bar | direction | \|ln(C/C_-1)\| / median \|r\| | target | Parkinson / median Parkinson |
+|---|---|:--:|---|:--:|---:|---:|---:|
+| HSI | 2018-11-02 | yes | O = L, C = H | up | **5.6×** | **0** | 11.86× |
+| HSI | 2023-08-25 | yes | O = H, C = L | down | **1.9×** | **0** | 1.39× |
+| NKX | 2005-11-01 | yes | O = L, C = H | up | **2.6×** | **0** | 3.42× |
 
 Rogers-Satchell is `ln(H/C)ln(H/O) + ln(L/C)ln(L/O)`, so it is **identically
 zero on any monotone bar** — one where the open is the low and the close the
 high, or the reverse — however large the move. The overnight term
 `(ln(O_t/C_{t-1}))^2` is zero exactly when the open prints at the previous
 close (a "stale open"). A monotone bar with a stale open therefore gives a
-target of exactly 0.0 on a day the index moved several percent. HSI carries 490
+target of exactly 0.0 on a day the index moved several times its own median
+daily move — 5.6× on the first of the three, whose Parkinson range estimator on
+the very same bar reads nearly twelve times the asset's median. HSI carries 490
 stale-open days and 38 monotone bars in `diagnostics.csv`; the 12 zeros are
 their intersection.
 
@@ -125,18 +145,22 @@ The same geometry with the open *near* rather than *at* the previous close
 leaves only the overnight term, and the target survives as a very small
 positive number. Five such days are scored across three assets:
 
-| asset | target_index | date | target | QLIKE range over the 13 models |
+| asset | target_index | date | target / asset median target | QLIKE range over the 13 models |
 |---|---:|---|---:|---:|
-| TWSE | 4,587 | 2023-09-14 | 4.401e-11 | 12.31 – 13.74 |
-| NKX | 3,854 | 2020-10-01 | 6.716e-11 | 12.64 – 13.85 |
-| TWSE | 3,676 | 2019-12-17 | 1.578e-10 | 10.72 – 12.02 |
-| CAC | 2,432 | 2014-07-04 | 2.431e-10 | 10.54 – 11.98 |
-| CAC | 2,403 | 2014-05-26 | 2.620e-09 | 8.61 – 9.67 |
+| TWSE | 4,587 | 2023-09-14 | 9.465e-07 | 12.31 – 13.74 |
+| NKX | 3,854 | 2020-10-01 | 8.597e-07 | 12.64 – 13.85 |
+| TWSE | 3,676 | 2019-12-17 | 3.394e-06 | 10.72 – 12.02 |
+| CAC | 2,432 | 2014-07-04 | 3.479e-06 | 10.54 – 11.98 |
+| CAC | 2,403 | 2014-05-26 | 3.750e-05 | 8.61 – 9.67 |
+
+Ratios, for the reason §1.1 gives: each of these is one realised target value
+next to its own date, which is the pairing that identifies a day. The QLIKE
+column is unchanged — a loss is the study's own output.
 
 The smallest ratio anywhere in the grid is `proxy/forecast = 3.54e-07`
 (NKX/`naive`, 2020-10-01), giving QLIKE 13.85 — the largest such term. NKX
-2020-10-01 is a bar whose close-to-close return is exactly 0.0 and whose four
-prices span 19 index points.
+2020-10-01 is a bar whose close-to-close return is exactly 0.0 and whose
+high-low range is **one thousandth** of that asset's median daily range.
 
 **Size of the effect, stated as a number and nothing more.** Over the 65 rows
 (5 days x 13 models), the maximum share of any cell's QLIKE *sum* taken by
@@ -355,8 +379,8 @@ Three facts are recorded because a later table could be read wrongly without
 them, and none of them is a defect:
 
 1. **13 target days are exactly zero** and lose their QLIKE. They are monotone
-   bars with stale opens, not quiet days; the largest carries a 4.1 %
-   close-to-close return (§1.3).
+   bars with stale opens, not quiet days; the largest moved 5.6 times its
+   asset's median daily move (§1.3).
 2. **5 further days are within 1e-8 of zero and are scored.** They contribute
    QLIKE terms of 8.6 to 13.9 and take up to 1.01 % of a cell's QLIKE sum
    (§1.4).

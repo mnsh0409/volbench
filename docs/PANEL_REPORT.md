@@ -151,9 +151,11 @@ exactly zero at once.
   sample — a stale or synthetic open in the Stooq file, not a market fact.
 
 Where the two coincide, the target is 0. Every such day is verifiably of that
-form: e.g. HSI 2024-04-12, `O=H=17095.03`, `L=C=16721.69`, previous close
-`17095.03` — a monotone down day whose open was carried over from the previous
-close.
+form: e.g. HSI 2024-04-12, where `O = H`, `L = C` and the open printed at the
+previous close — a monotone down day whose open was carried over. The four
+prices are not quoted: a bar's OHLC is four realised observations of a series
+Stooq forbids redistributing, and the shape is the whole of the claim
+(docs/P3_ORDER_STATISTICS.md).
 
 **Why this was a live problem, and what D-018 did about it.** `HAR.fit` raises
 on a non-positive realized-variance input, and every log-RV model takes

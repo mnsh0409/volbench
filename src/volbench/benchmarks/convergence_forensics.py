@@ -43,7 +43,7 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -60,16 +60,24 @@ from volbench.runner import AssetData, ModelConfig
 
 __all__ = [
     "BOUNDARY_TOLERANCES",
+    "COLUMN_POLICY",
     "GARCH_LABELS",
+    "OrderStatisticError",
     "at_bound_table",
     "boundary_flags",
     "constraint_slack",
     "dia_intersection",
+    "fit_run_table",
     "gamma_persistence_table",
     "paired_windows",
+    "publishable",
     "refit_all",
     "refit_cell",
+    "refuse_unpublishable",
+    "unpublishable_columns",
     "window_stats",
+    "with_publishable_ratios",
+    "write_fits",
 ]
 
 #: The three configs whose adapter implements ``fit_diagnostics``. The other
@@ -227,6 +235,186 @@ def refit_all(
 
 
 # --------------------------------------------------------------------------
+# what may be published
+# --------------------------------------------------------------------------
+
+#: Every derived column this module builds, tagged at construction.
+#:
+#: ``"aggregate"``
+#:     A function of many observations — a mean, a variance, a kurtosis, a
+#:     count, a fitted parameter, or a ratio of two such. It says something
+#:     about the sample without returning any member of it, so publishing it
+#:     redistributes nothing.
+#: ``"order_statistic"``
+#:     A function that **returns one realised observation**: a max, a min, a
+#:     quoted return or target value. ``max_abs_return`` is
+#:     ``np.max(np.abs(window))`` — one log return of a licensed-derived
+#:     series, verbatim, and a sequence of them over overlapping windows
+#:     brackets the dates too (docs/P3_REPO_HYGIENE.md §3,
+#:     docs/data_licenses.md). Never emitted into an artifact or a report.
+#:
+#: A ratio of two order statistics is an ``"aggregate"``: it discloses neither
+#: operand, and every argument these numbers carry is comparative, so the
+#: comparison survives the redaction intact. Coarsening does not qualify —
+#: rounding `0.14183` to `0.142` still hands over three digits of a real
+#: observation, which is enough to match against the series.
+#:
+#: **Untagged is unpublishable.** :func:`unpublishable_columns` reports a
+#: column it has never heard of exactly as it reports an order statistic, so a
+#: column added later cannot reach a report by nobody having thought about it.
+COLUMN_POLICY: Final[Mapping[str, str]] = {
+    # identity
+    "asset": "aggregate",
+    "config": "aggregate",
+    "fit_origin": "aggregate",
+    "date": "aggregate",
+    "window_start_date": "aggregate",
+    "crisis_tag": "aggregate",
+    "fallback": "aggregate",
+    "stored_status": "aggregate",
+    "refit_status": "aggregate",
+    # the fit window, described
+    "n": "aggregate",
+    "std": "aggregate",
+    "kurtosis": "aggregate",
+    "skew": "aggregate",
+    "n_zero_returns": "aggregate",
+    "max_abs_return": "order_statistic",
+    "max_abs_over_clean_median": "aggregate",
+    "max_abs_ratio": "aggregate",
+    # the optimiser's terminal state
+    "loglikelihood": "aggregate",
+    "convergence_flag": "aggregate",
+    "converged_flag": "aggregate",
+    "message": "aggregate",
+    "iterations": "aggregate",
+    "function_evals": "aggregate",
+    "scale": "aggregate",
+    # fitted parameters, their bounds and their slack
+    "omega": "aggregate",
+    "omega_low": "aggregate",
+    "omega_high": "aggregate",
+    "omega_return_scale": "aggregate",
+    "alpha[1]": "aggregate",
+    "alpha[1]_low": "aggregate",
+    "alpha[1]_high": "aggregate",
+    "beta[1]": "aggregate",
+    "beta[1]_low": "aggregate",
+    "beta[1]_high": "aggregate",
+    "gamma[1]": "aggregate",
+    "gamma[1]_low": "aggregate",
+    "gamma[1]_high": "aggregate",
+    "nu": "aggregate",
+    "nu_low": "aggregate",
+    "nu_high": "aggregate",
+    "alpha_plus_beta": "aggregate",
+    "alpha_plus_gamma": "aggregate",
+    "persistence": "aggregate",
+    "stationarity_slack": "aggregate",
+    "slack_low_omega": "aggregate",
+    "slack_high_omega": "aggregate",
+    "slack_low_alpha[1]": "aggregate",
+    "slack_high_alpha[1]": "aggregate",
+    "slack_low_beta[1]": "aggregate",
+    "slack_high_beta[1]": "aggregate",
+    "slack_low_gamma[1]": "aggregate",
+    "slack_high_gamma[1]": "aggregate",
+    "slack_low_nu": "aggregate",
+    "slack_high_nu": "aggregate",
+    # comparison bookkeeping (paired_windows)
+    "nearest_converged": "aggregate",
+    "nearest_gap": "aggregate",
+    "nearest_alpha_plus_beta": "aggregate",
+}
+
+
+class OrderStatisticError(RuntimeError):
+    """Raised rather than emitting a realised observation into a report."""
+
+
+def _policy_kind(column: str) -> str | None:
+    """The tag for *column*, resolving ``paired_windows``' ``{asset}_`` prefixes."""
+    if column in COLUMN_POLICY:
+        return COLUMN_POLICY[column]
+    candidates = [key for key in COLUMN_POLICY if column.endswith(f"_{key}")]
+    if not candidates:
+        return None
+    return COLUMN_POLICY[max(candidates, key=len)]
+
+
+def unpublishable_columns(columns: Iterable[str]) -> list[str]:
+    """Which of *columns* may not be published, order statistics and untagged."""
+    return [str(c) for c in columns if _policy_kind(str(c)) != "aggregate"]
+
+
+def refuse_unpublishable(frame: pd.DataFrame, what: str) -> pd.DataFrame:
+    """*frame* unchanged, or :class:`OrderStatisticError` naming the columns.
+
+    The gate every emitting path goes through. A policy nothing enforces is a
+    memory, and this one had already reached three committed tables before it
+    was written down.
+    """
+    offenders = unpublishable_columns(frame.columns)
+    if offenders:
+        raise OrderStatisticError(
+            f"{what}: refusing to emit {offenders} — an order statistic returns one "
+            "realised observation of a licensed-derived series (docs/data_licenses.md). "
+            "Publish a ratio or a rank instead, or tag the column in COLUMN_POLICY."
+        )
+    return frame
+
+
+def publishable(frame: pd.DataFrame) -> pd.DataFrame:
+    """*frame* with its order statistics dropped, then checked.
+
+    Two steps rather than one on purpose: the drop handles the columns this
+    module knows are order statistics, and the check then still refuses
+    anything untagged, so the convenience cannot become a bypass.
+    """
+    keep = [c for c in frame.columns if _policy_kind(str(c)) == "aggregate"]
+    dropped = frame.loc[:, keep]
+    return refuse_unpublishable(dropped, "publishable()")
+
+
+def with_publishable_ratios(fits: pd.DataFrame) -> pd.DataFrame:
+    """Add the ratio that carries ``max_abs_return``'s argument without its value.
+
+    ``max_abs_over_clean_median`` is each fit's window maximum over the median
+    window maximum of the *converged* fits of the same ``(asset, config)``
+    cell. Every claim the raw column supported is comparative — this window is
+    extreme relative to the cell, these fits all see the same maximum — and a
+    ratio makes each of them without disclosing either operand.
+    """
+    frame = fits.copy()
+    maxima = frame["max_abs_return"].to_numpy(dtype=float)
+    is_clean = ~frame["fallback"].to_numpy(dtype=bool)
+    cells = list(zip(frame["asset"].astype(str), frame["config"].astype(str), strict=True))
+    denominator = np.full(len(frame), np.nan, dtype=float)
+    for cell in set(cells):
+        here = np.array([c == cell for c in cells])
+        clean_here = maxima[here & is_clean]
+        if clean_here.size:
+            denominator[here] = float(np.median(clean_here))
+    frame["max_abs_over_clean_median"] = maxima / denominator
+    return frame
+
+
+def write_fits(fits: pd.DataFrame, path: Path) -> Path:
+    """Write the fits table as a publication artifact, order statistics refused.
+
+    The same declaration protects this file and the report tables, so a future
+    committed parquet cannot carry what a committed markdown table may not.
+    """
+    frame = refuse_unpublishable(fits, str(path))
+    if path.suffix == ".csv":
+        frame.to_csv(path, index=False)
+    else:
+        frame.to_parquet(path, index=False)
+    return path
+
+
+
+# --------------------------------------------------------------------------
 # the boundary question
 # --------------------------------------------------------------------------
 
@@ -295,7 +483,7 @@ def gamma_persistence_table(fits: pd.DataFrame, asset: str, config: str) -> pd.D
     Fallbacks and clean fits described the same way and side by side, because
     the question is where the former sit *relative to* the latter.
     """
-    cell = fits[(fits["asset"] == asset) & (fits["config"] == config)]
+    cell = with_publishable_ratios(fits[(fits["asset"] == asset) & (fits["config"] == config)])
     slack = constraint_slack(cell)
     described = cell.assign(
         alpha_plus_gamma=slack["alpha_plus_gamma"], stationarity_slack=slack["stationarity"]
@@ -308,13 +496,47 @@ def gamma_persistence_table(fits: pd.DataFrame, asset: str, config: str) -> pd.D
         "persistence",
         "alpha_plus_gamma",
         "kurtosis",
-        "max_abs_return",
+        "max_abs_over_clean_median",
         "std",
     ]
-    grouped = described.groupby("fallback")[columns]
+    grouped = publishable(described)[[*columns, "fallback"]].groupby("fallback")[columns]
     table = grouped.describe(percentiles=[0.05, 0.5, 0.95]).transpose()
     table.columns = pd.Index(["clean", "fallback"][: table.shape[1]])
     return table
+
+
+def fit_run_table(
+    fits: pd.DataFrame, asset: str, config: str, origins: Sequence[int]
+) -> pd.DataFrame:
+    """Every fit of one cell at *origins*, fit by fit, in publishable form.
+
+    The window maximum appears as its ratio to the cell's clean median, never
+    as itself: paired with this table's ``date`` column, the raw value would be
+    a (magnitude, dated) pair, which is precisely the disclosure a withheld
+    parquet was withheld to prevent. The ratio still shows what the column was
+    read for — a run of fits whose ratio does not move is a run of fits seeing
+    one unchanged window maximum.
+    """
+    cell = with_publishable_ratios(fits[(fits["asset"] == asset) & (fits["config"] == config)])
+    slack = constraint_slack(cell)
+    described = cell.assign(
+        alpha_plus_gamma=slack["alpha_plus_gamma"], stationarity_slack=slack["stationarity"]
+    )
+    rows = described[described["fit_origin"].isin(list(origins))]
+    columns = [
+        "fit_origin",
+        "date",
+        "fallback",
+        "alpha[1]",
+        "gamma[1]",
+        "beta[1]",
+        "alpha_plus_beta",
+        "persistence",
+        "alpha_plus_gamma",
+        "kurtosis",
+        "max_abs_over_clean_median",
+    ]
+    return publishable(rows)[columns].sort_values("fit_origin").reset_index(drop=True)
 
 
 def paired_windows(
@@ -352,15 +574,22 @@ def paired_windows(
             near = nearest_converged(frame, int(origin))
             here = frame.loc[origin]
             row[f"{asset}_fallback"] = bool(here["fallback"])
-            for column in ("kurtosis", "max_abs_return", "std"):
+            for column in ("kurtosis", "std"):
                 row[f"{asset}_{column}"] = float(np.asarray(here[column], dtype=float))
             row[f"{asset}_nearest_converged"] = near
             row[f"{asset}_nearest_gap"] = abs(near - int(origin))
             row[f"{asset}_nearest_alpha_plus_beta"] = float(
                 np.asarray(frame.loc[near, "alpha_plus_beta"], dtype=float)
             )
+        # The two window maxima are order statistics and neither is emitted;
+        # their ratio is what the comparison was ever about and discloses
+        # neither. right/left, so >1 means the right-hand asset saw the larger
+        # move in that window.
+        row["max_abs_ratio"] = float(
+            np.asarray(sides[right].loc[origin, "max_abs_return"], dtype=float)
+        ) / float(np.asarray(sides[left].loc[origin, "max_abs_return"], dtype=float))
         rows.append(row)
-    return pd.DataFrame(rows)
+    return refuse_unpublishable(pd.DataFrame(rows), "paired_windows()")
 
 
 def dia_intersection(fits: pd.DataFrame, asset: str = "DIA") -> dict[str, Any]:
@@ -396,19 +625,33 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--manifest", type=Path, default=Path("docs/P3_GRID_manifest.json")
     )
-    parser.add_argument("--out", type=Path, default=Path("docs/P3_CONVERGENCE_FITS.parquet"))
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path("docs/P3_CONVERGENCE_FITS.parquet"),
+        help="the publication artifact; order statistics are refused here",
+    )
+    parser.add_argument(
+        "--full-out",
+        type=Path,
+        default=Path("data/grid_primary/convergence_fits_full.parquet"),
+        help="the working frame, order statistics included; must stay under data/",
+    )
     parser.add_argument("--assets", nargs="*", default=None)
     args = parser.parse_args(argv)
 
     started = time.perf_counter()
-    fits = refit_all(
-        store_root=args.store_root, manifest_path=args.manifest, assets=args.assets
+    fits = with_publishable_ratios(
+        refit_all(store_root=args.store_root, manifest_path=args.manifest, assets=args.assets)
     )
-    if args.out.suffix == ".csv":
-        fits.to_csv(args.out, index=False)
-    else:
-        fits.to_parquet(args.out, index=False)
+    # The working frame keeps everything and lives where the licensing guard
+    # already governs; the published one goes through the gate. One column
+    # declaration, two destinations, and no per-file judgement to make.
+    args.full_out.parent.mkdir(parents=True, exist_ok=True)
+    fits.to_parquet(args.full_out, index=False)
+    write_fits(publishable(fits), args.out)
     print(f"{len(fits)} fits re-fitted in {time.perf_counter() - started:.1f}s -> {args.out}")
+    print(f"working frame (order statistics included) -> {args.full_out}")
     print(f"fallbacks: {int(fits['fallback'].sum())}")
     print(f"crisis tags: {fits.loc[fits['fallback'], 'crisis_tag'].value_counts().to_dict()}")
     print(f"windows named: {[w.tag for w in CRISIS_WINDOWS]} + {CALM_TAG!r}")
