@@ -501,3 +501,242 @@ def test_alignment_check_is_a_frozen_record() -> None:
     assert isinstance(check, AlignmentCheck)
     with pytest.raises(AttributeError):
         check.stored_crps = 0.0  # type: ignore[misc]
+
+
+# --------------------------------------------------------------------------
+# FZ0, HAC standard errors, loss tables, pairwise-complete accounting
+# --------------------------------------------------------------------------
+
+
+class TestFZ0:
+    def test_it_matches_the_formula_worked_by_hand(self) -> None:
+        """PZC (2019) eq. 6 at a point where every term is nonzero, so an error
+        in any one of the four cannot cancel against another."""
+        # y <= v: -0.5/(0.05 * -2) + (-1.5)/(-2) + log(2) - 1
+        assert analysis.fz0_loss(-2.0, -1.5, -2.0, 0.05) == pytest.approx(
+            5.0 + 0.75 + math.log(2.0) - 1.0
+        )
+        # y > v: the shortfall term drops out entirely.
+        assert analysis.fz0_loss(0.0, -1.5, -2.0, 0.05) == pytest.approx(
+            0.75 + math.log(2.0) - 1.0
+        )
+
+    def test_it_is_minimized_at_the_true_var_and_es(self) -> None:
+        """The property the loss exists for (PZC Fig. 2): if this failed, the
+        column would not rank ES forecasts and the table would mean nothing."""
+        level = 0.05
+        draw = np.random.default_rng(20260829).standard_normal(400_000)
+        var = float(stats.norm.ppf(level))
+        es = float(-stats.norm.pdf(stats.norm.ppf(level)) / level)
+
+        def average(v: float, e: float) -> float:
+            return float(np.mean([analysis.fz0_loss(y, v, e, level) for y in draw[:20_000]]))
+
+        truth = average(var, es)
+        assert truth < average(var - 0.25, es - 0.25)
+        assert truth < average(var + 0.25, es + 0.25)
+        assert truth < average(var, es - 0.4)
+
+    def test_the_vectorized_path_cannot_drift_from_the_scalar_one(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "realized_return": [-0.05, 0.01, -0.2, np.nan],
+                "var_0p05": [-0.03, -0.03, -0.04, -0.03],
+                "es_0p05": [-0.05, -0.05, -0.06, -0.05],
+            }
+        )
+        column = analysis.fz0_column(frame, 0.05)
+        for i in range(3):
+            assert column[i] == pytest.approx(
+                analysis.fz0_loss(
+                    float(frame["realized_return"][i]),
+                    float(frame["var_0p05"][i]),
+                    float(frame["es_0p05"][i]),
+                    0.05,
+                )
+            )
+        assert math.isnan(column[3])
+
+    def test_it_agrees_with_the_packages_own_implementation(self) -> None:
+        """Two implementations written independently from the same paper. The
+        analysis layer is forbidden from importing ``volbench.backtests``, which
+        is what makes this an agreement rather than a tautology — and a test may
+        import both, which is what makes it checkable."""
+        from volbench.backtests import fz0_loss as shipped
+
+        rng = np.random.default_rng(41)
+        returns = rng.standard_normal(200) * 0.02
+        for level in (0.01, 0.025, 0.05):
+            var = float(stats.norm.ppf(level)) * 0.02
+            es = float(-stats.norm.pdf(stats.norm.ppf(level)) / level) * 0.02
+            theirs = shipped(returns, var, es, level)
+            for i, y in enumerate(returns):
+                assert analysis.fz0_loss(float(y), var, es, level) == pytest.approx(
+                    float(theirs[i]), rel=1e-12, abs=1e-15
+                )
+
+    def test_it_refuses_the_sign_convention_bug_rather_than_scoring_it(self) -> None:
+        """A positive ES is what a loss-side sign convention looks like, and it
+        would score — wrongly, and silently — if the domain were not checked."""
+        with pytest.raises(ValueError, match="below zero"):
+            analysis.fz0_loss(-2.0, 1.5, 2.0, 0.05)
+        with pytest.raises(ValueError, match="ES <= VaR"):
+            analysis.fz0_loss(-2.0, -2.0, -1.5, 0.05)
+        with pytest.raises(ValueError):
+            analysis.fz0_loss(-2.0, -1.5, -2.0, 0.0)
+
+
+class TestHAC:
+    def test_the_bandwidth_rule_is_the_one_the_docstring_states(self) -> None:
+        assert analysis.hac_bandwidth(100) == 4
+        assert analysis.hac_bandwidth(4904) == 9
+        assert analysis.hac_bandwidth(2791) == 8
+        assert analysis.hac_bandwidth(1) == 0
+
+    def test_the_long_run_variance_matches_the_formula_worked_by_hand(self) -> None:
+        """gamma_0 = 3.5, gamma_1 = -0.75, Bartlett weight 1/2 at L = 1."""
+        answer = analysis.hac_mean_se(np.array([1.0, 3.0, 2.0, 6.0]), bandwidth=1)
+        assert answer["mean"] == pytest.approx(3.0)
+        assert answer["se"] == pytest.approx(math.sqrt(2.75 / 4.0))
+        assert answer["se_iid"] == pytest.approx(math.sqrt(3.5 / 3.0))
+        assert answer["bandwidth"] == 1
+
+    def test_serial_dependence_inflates_the_standard_error(self) -> None:
+        """The whole reason for the column. A positively autocorrelated series
+        carries less information per observation than an iid one, and an iid
+        standard error would say otherwise."""
+        rng = np.random.default_rng(7)
+        shocks = rng.standard_normal(4000)
+        ar1 = np.zeros(4000)
+        for t in range(1, 4000):
+            ar1[t] = 0.85 * ar1[t - 1] + shocks[t]
+        dependent = analysis.hac_mean_se(ar1)
+        independent = analysis.hac_mean_se(shocks)
+        assert dependent["se"] > 2.5 * dependent["se_iid"]
+        assert independent["se"] == pytest.approx(independent["se_iid"], rel=0.25)
+
+    def test_it_is_never_negative_under_the_bartlett_kernel(self) -> None:
+        """A truncated (unweighted) estimator can return a negative long-run
+        variance and then a NaN standard error. Bartlett's weights cannot."""
+        rng = np.random.default_rng(3)
+        for _ in range(50):
+            series = rng.standard_normal(60)
+            series[1::2] *= -1.0  # strong negative autocorrelation
+            assert analysis.hac_mean_se(series)["se"] >= 0.0
+
+    def test_holes_are_dropped_and_counted_rather_than_filled(self) -> None:
+        with_hole = np.array([1.0, np.nan, 3.0, 2.0, 6.0])
+        answer = analysis.hac_mean_se(with_hole, bandwidth=1)
+        closed = analysis.hac_mean_se(np.array([1.0, 3.0, 2.0, 6.0]), bandwidth=1)
+        assert answer["n"] == 4
+        assert answer["n_dropped"] == 1
+        assert answer["se"] == pytest.approx(closed["se"])
+
+    def test_a_constant_series_has_no_standard_error_to_report(self) -> None:
+        answer = analysis.hac_mean_se(np.full(50, 2.5))
+        assert answer["mean"] == pytest.approx(2.5)
+        assert answer["se"] == pytest.approx(0.0)
+
+
+def _loss_grid() -> pd.DataFrame:
+    """Two models over five origins of one asset, with one hole in each loss."""
+    rows = []
+    for model, offset in (("alpha", 0.0), ("beta", 1.0)):
+        for origin in range(5):
+            rows.append(
+                {
+                    "asset": "AAA",
+                    "model_label": model,
+                    "origin_index": origin,
+                    "crps": np.nan if (model == "alpha" and origin == 1) else origin + offset,
+                    "qlike": np.nan if origin == 4 else origin + offset,
+                    "realized_return": -0.01 * (origin + 1),
+                    "var_0p05": -0.02,
+                    "es_0p05": -0.03,
+                    "pinball_0p05": 0.1 * origin,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+class TestLossTable:
+    def test_the_mean_is_the_mean_and_n_is_what_it_was_taken_over(self) -> None:
+        table = analysis.loss_table(_loss_grid(), "AAA", losses=["crps", "qlike"])
+        alpha = table[(table["model"] == "alpha") & (table["loss"] == "crps")].iloc[0]
+        assert alpha["n"] == 4
+        assert alpha["n_dropped"] == 1
+        assert alpha["mean"] == pytest.approx(np.mean([0.0, 2.0, 3.0, 4.0]))
+        assert alpha["origins"] == 5
+
+    def test_the_answer_does_not_depend_on_the_frames_row_order(self) -> None:
+        """A long-run variance read off a shuffled frame is a number about the
+        shuffle. ``loss_table`` sorts by origin before the estimator sees it."""
+        grid = _loss_grid()
+        shuffled = grid.sample(frac=1.0, random_state=1).reset_index(drop=True)
+        ordered = analysis.loss_table(grid, "AAA", losses=["crps"])
+        assert analysis.loss_table(shuffled, "AAA", losses=["crps"]).equals(ordered)
+
+    def test_it_refuses_an_asset_it_has_no_rows_for(self) -> None:
+        with pytest.raises(ValueError, match="no rows for asset"):
+            analysis.loss_table(_loss_grid(), "ZZZ")
+
+
+class TestPairwiseComplete:
+    def test_the_intersection_is_where_both_models_score(self) -> None:
+        result = analysis.pairwise_complete(_loss_grid(), "AAA", "crps")
+        assert result.origins == 5
+        assert result.n_used.loc["alpha", "alpha"] == 4
+        assert result.n_used.loc["beta", "beta"] == 5
+        assert result.n_used.loc["alpha", "beta"] == 4
+        assert result.dropped.loc["alpha", "beta"] == 1
+        assert result.dropped.loc["beta", "beta"] == 0
+
+    def test_both_matrices_are_symmetric(self) -> None:
+        result = analysis.pairwise_complete(_loss_grid(), "AAA", "qlike")
+        assert result.n_used.equals(result.n_used.T)
+        assert result.dropped.equals(result.dropped.T)
+
+    def test_it_aligns_on_the_origin_and_not_on_row_position(self) -> None:
+        """Two models whose rows arrive in different orders are still compared
+        day against day. Aligning positionally would silently pair 2020-01-02's
+        score with 2020-03-11's and report a full sample."""
+        grid = _loss_grid()
+        flipped = pd.concat(
+            [
+                grid[grid["model_label"] == "alpha"],
+                grid[grid["model_label"] == "beta"].iloc[::-1],
+            ],
+            ignore_index=True,
+        )
+        assert analysis.pairwise_complete(flipped, "AAA", "crps").n_used.equals(
+            analysis.pairwise_complete(grid, "AAA", "crps").n_used
+        )
+
+    def test_the_largest_drop_names_the_pair_it_belongs_to(self) -> None:
+        answer = analysis.pairwise_complete(_loss_grid(), "AAA", "crps").largest_drop()
+        assert answer["dropped"] == 1
+        assert "alpha" in (answer["model_a"], answer["model_b"])
+
+    def test_the_long_form_carries_every_ordered_pair(self) -> None:
+        long = analysis.pairwise_complete_long(_loss_grid(), losses=["crps", "qlike"])
+        assert len(long) == 2 * 2 * 2
+        assert set(long["loss"]) == {"crps", "qlike"}
+        assert (long["dropped"] == long["origins"] - long["n_used"]).all()
+
+
+class TestMissingnessPatterns:
+    def test_losses_nan_on_the_same_rows_are_one_pattern(self) -> None:
+        frame = pd.DataFrame(
+            {"a": [1.0, np.nan, 3.0], "b": [4.0, np.nan, 6.0], "c": [7.0, 8.0, np.nan]}
+        )
+        patterns = analysis.missingness_patterns(frame, ["a", "b", "c"])
+        assert len(patterns) == 2
+        assert patterns.loc[0, "losses"] == "a, b"
+        assert patterns.loc[0, "n_finite"] == 2
+        assert patterns.loc[1, "losses"] == "c"
+
+    def test_a_single_differing_row_splits_a_pattern(self) -> None:
+        """The check is element-wise, not a count: two losses with the same
+        number of NaNs in different places are not the same sample."""
+        frame = pd.DataFrame({"a": [1.0, np.nan, 3.0], "b": [np.nan, 5.0, 6.0]})
+        assert len(analysis.missingness_patterns(frame, ["a", "b"])) == 2

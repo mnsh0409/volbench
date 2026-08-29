@@ -76,11 +76,13 @@ __all__ = [
     "SCORE_REASONS",
     "AlignmentCheck",
     "GridFrame",
+    "PairwiseComplete",
     "PredictiveLaw",
     "alignment_check",
     "alignment_table",
     "cell_index",
     "fallback_rates",
+    "finite_mask_frame",
     "forecast_floor_report",
     "fz0_column",
     "fz0_loss",
@@ -92,9 +94,12 @@ __all__ = [
     "loss_columns",
     "loss_table",
     "missing_accounting",
+    "missingness_patterns",
     "nonfinite_report",
     "normal_crps",
     "normal_quantile",
+    "pairwise_complete",
+    "pairwise_complete_long",
     "qlike_loss",
     "qlike_positivity",
     "reason_kind",
@@ -643,6 +648,143 @@ def loss_table(grid: GridFrame, asset: str, *, losses: Sequence[str] = LOSS_ORDE
                 {"asset": asset, "model": model, "loss": loss, "origins": origins, **summary}
             )
     return pd.DataFrame(rows)
+
+
+# --------------------------------------------------------------------------
+# pairwise-complete accounting
+# --------------------------------------------------------------------------
+
+
+def finite_mask_frame(grid: GridFrame, asset: str, loss: str) -> pd.DataFrame:
+    """``origin_index`` x ``model_label`` booleans: is this loss finite there?
+
+    The pivot is on ``origin_index`` and never on row position: two models of
+    one asset are compared where they forecast the *same day*, which is what
+    "the same sample" has to mean. A model missing an origin entirely reads
+    False there rather than shortening the frame.
+    """
+    cell = grid.loc[grid["asset"] == asset, ["origin_index", "model_label", loss]]
+    if cell.empty:
+        raise ValueError(f"no rows for asset {asset!r}")
+    wide = cell.pivot(index="origin_index", columns="model_label", values=loss)
+    finite = np.isfinite(wide.to_numpy(dtype=np.float64))
+    return pd.DataFrame(finite, index=wide.index, columns=wide.columns)
+
+
+@dataclass(frozen=True)
+class PairwiseComplete:
+    """One asset's model-by-model overlap for one loss.
+
+    ``n_used[i, j]`` is the count of origins where **both** models score
+    finitely — the intersection every model-versus-model comparison has to run
+    on. ``dropped[i, j]`` is that subtracted from :attr:`origins`, the asset's
+    own origin count, so a zero means the pair is compared on the whole
+    sample. Both matrices are symmetric with the per-model count on the
+    diagonal.
+    """
+
+    asset: str
+    loss: str
+    origins: int
+    n_used: pd.DataFrame
+    dropped: pd.DataFrame
+
+    @property
+    def models(self) -> tuple[str, ...]:
+        return tuple(str(name) for name in self.n_used.columns)
+
+    def largest_drop(self) -> dict[str, Any]:
+        """The worst-overlapping pair, and by how much. Diagonal included: a
+        model that loses rows against *itself* loses them against everything."""
+        values = self.dropped.to_numpy()
+        i, j = np.unravel_index(int(np.argmax(values)), values.shape)
+        models = self.models
+        return {
+            "asset": self.asset,
+            "loss": self.loss,
+            "model_a": models[i],
+            "model_b": models[j],
+            "dropped": int(values[i, j]),
+            "n_used": int(self.n_used.to_numpy()[i, j]),
+            "origins": self.origins,
+        }
+
+
+def pairwise_complete(grid: GridFrame, asset: str, loss: str) -> PairwiseComplete:
+    """``asset``'s :class:`PairwiseComplete` for ``loss``."""
+    mask = finite_mask_frame(grid, asset, loss)
+    models = [str(name) for name in mask.columns]
+    values = mask.to_numpy(dtype=np.int64)
+    origins = int(mask.shape[0])
+    n_used = pd.DataFrame(values.T @ values, index=models, columns=models)
+    return PairwiseComplete(
+        asset=asset, loss=loss, origins=origins, n_used=n_used, dropped=origins - n_used
+    )
+
+
+def pairwise_complete_long(
+    grid: GridFrame, *, losses: Sequence[str] = LOSS_ORDER, assets: Sequence[str] | None = None
+) -> pd.DataFrame:
+    """Every (asset, loss, model_a, model_b) pair, as one long frame.
+
+    Long rather than 121 square blocks, because the next stage reads it by key
+    and a square layout would have to be parsed back out of a header.
+    """
+    names = sorted(grid["asset"].unique()) if assets is None else list(assets)
+    rows: list[pd.DataFrame] = []
+    for asset in names:
+        for loss in losses:
+            result = pairwise_complete(grid, asset, loss)
+            models = result.models
+            a = np.repeat(models, len(models))
+            b = np.tile(models, len(models))
+            used = result.n_used.to_numpy().reshape(-1)
+            rows.append(
+                pd.DataFrame(
+                    {
+                        "asset": asset,
+                        "loss": loss,
+                        "model_a": a,
+                        "model_b": b,
+                        "origins": result.origins,
+                        "n_used": used,
+                        "dropped": result.origins - used,
+                    }
+                )
+            )
+    return pd.concat(rows, ignore_index=True)
+
+
+def missingness_patterns(grid: GridFrame, losses: Sequence[str] = LOSS_ORDER) -> pd.DataFrame:
+    """Which losses share a finite/NaN pattern, over the whole grid, exactly.
+
+    Measured rather than assumed. If two losses are NaN on precisely the same
+    rows then their pairwise-complete matrices are the same matrix, and saying
+    so is worth more than printing it twice; if they are not, a table that
+    reused one for the other would be wrong. Losses are grouped by a hash of
+    their finite mask and the groups are checked element-wise, so a hash
+    collision cannot merge two patterns.
+    """
+    masks = {loss: np.isfinite(grid[loss].to_numpy(dtype=np.float64)) for loss in losses}
+    groups: list[list[str]] = []
+    for loss, mask in masks.items():
+        for group in groups:
+            if np.array_equal(mask, masks[group[0]]):
+                group.append(loss)
+                break
+        else:
+            groups.append([loss])
+    return pd.DataFrame(
+        [
+            {
+                "pattern": index,
+                "losses": ", ".join(group),
+                "n_finite": int(masks[group[0]].sum()),
+                "n_nan": int((~masks[group[0]]).sum()),
+            }
+            for index, group in enumerate(groups)
+        ]
+    )
 
 
 # --------------------------------------------------------------------------
