@@ -5,6 +5,35 @@
 **Prerequisite:** Prompt J1 has run and `docs/P3_ANALYSIS_ASSUMPTIONS.md` exists. **Read it first** rather than re-deriving the assumptions, and say so. If J1 reported an inert or leaking canary on any model, stop and say so instead of proceeding.
 **Terminal:** the main integration checkout (the one that ran the primary grid), on branch `feat/p3-analysis`, branched from an up-to-date `main`.
 
+---
+
+## STOP — read this before anything else
+
+Prompts K and L ran after this file was written. Three things changed, and the first can silently invalidate everything you compute.
+
+### 1. The store is append-only, and 44 cells were replaced
+
+Prompt L fixed two model defects and re-ran **44 cells** — 11 `lgbm` (CPU) and 33 TSFM (GPU) — under **new config hashes**. The superseded fragments are **still on disk beside the corrected ones**, because the store never deletes.
+
+So before computing anything:
+
+- Assert that **every fragment you read is the one the current manifest names.** Report the manifest's path and the git SHA of the commit you read it at.
+- Report how many of the 143 cells resolve to hashes changed by L. **Expect exactly 44.** If it is 0, you are reading the pre-fix grid and everything downstream would be wrong with no error raised — stop and report. If it is neither 0 nor 44, stop and report that too.
+
+This check exists because a stale manifest here produces entirely plausible tables and no exception. Treat "I read the right fragments" as something to prove, not assume.
+
+### 2. Some J1 artifacts are superseded
+
+`docs/P3_LEAKAGE_CANARY_EXT.md`'s rows for `lgbm`, `chronos`, `timesfm` and `moirai`, and `docs/P3_GRID*`'s records for those 44 cells, are superseded by **`docs/P3_MODEL_DEFECT_FIXES.md`**. Prefer the latter wherever they disagree, and say which you used.
+
+`docs/P3_ANALYSIS_ASSUMPTIONS.md` remains valid — it records schema facts, not results — and you should still read it first rather than re-deriving it.
+
+### 3. Two additions to the work below
+
+- **§2a, QLIKE leverage.** J1 found **five target days within 1e-8 of zero that are scored**, contributing QLIKE terms of 8.6–13.9 and **up to 1.01% of a cell's QLIKE sum from five observations**. Report every QLIKE figure **twice — with and without those five rows** — and report which asset and date each belongs to. A ranking that turns on five observations needs to be visible as such. (Separately, 13 further days are exactly zero and lose QLIKE entirely; they are monotone bars with stale opens, the largest carrying a +4.13% close-to-close return. Report whether the invalid-target policy tests `< 0` or `<= 0`, since that decides whether these are handled or falling through.)
+- **§1 and §2b, AutoARIMA.** J1 measured **non-zero optimizer status on 2,334 of 2,366 `autoarima` fits (98.6%)** — scipy BFGS status 2, never `maxiter`, never NaN — and 40 distinct ARMA orders selected. Carry that rate in the loss tables the same way the GARCH fallback rates are carried, and report the per-asset breakdown. Do not interpret it.
+
+---
 **Session:** start this as a **fresh, separately named** Claude Code session (`claude -n vb-<this-prompt>`). Do not continue an earlier session — this prompt is written to be self-contained, and a session carrying prior conclusions is the specific failure mode it is designed to avoid.
 
 ---
