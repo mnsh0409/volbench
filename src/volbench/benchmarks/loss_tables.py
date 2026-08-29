@@ -240,6 +240,19 @@ each table's caption states its own. `se_iid` in the CSV is the ordinary
 `sqrt(gamma_0 / (n-1))` for the same series, so the inflation the serial
 dependence buys is visible next to the number it applies to.
 
+**How sensitive the numbers are to that bandwidth**, measured rather than
+asserted. Recomputing all 1,573 standard errors at twice the rule's bandwidth
+raises them by a median of **9 %** (5th to 95th percentile 1.7 % to 26 %, maximum
+29 %); at four times, by a median of **19 %** (2.1 % to 60 %, maximum 68 %).
+It is not uniform across losses — at twice the bandwidth the median rise is
+26 % for CRPS and 20 % for the log score, against 3.5 % for QLIKE and for FZ0
+at the 1 % level. A Bartlett kernel at a fixed rule-of-thumb bandwidth
+**understates** the long-run variance of a highly persistent series (on a
+simulated AR(1) at rho = 0.9, where the truth is known, it recovers 60 % of
+it; at rho = 0.5, 94 %; at rho = 0, 99 % —
+`tests/test_analysis.py::TestHAC`). Every standard error here is therefore a
+lower bound in the direction that matters, by the amounts above.
+
 **Holes.** A loss series with an unscorable day in it has a hole, and a HAC
 estimator has no way to represent one: lag `j` across a hole spans more than
 `j` days. Non-finite values are dropped and the remainder treated as adjacent;

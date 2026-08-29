@@ -615,6 +615,33 @@ class TestHAC:
         assert dependent["se"] > 2.5 * dependent["se_iid"]
         assert independent["se"] == pytest.approx(independent["se_iid"], rel=0.25)
 
+    def test_it_recovers_a_known_long_run_variance(self) -> None:
+        """An AR(1)'s long-run variance is ``sigma_e^2 / (1 - rho)^2``, so the
+        estimator can be checked against a truth rather than against itself.
+
+        The rho = 0.9 leg is the point: at a fixed rule-of-thumb bandwidth the
+        Bartlett kernel recovers only about 60 % of a highly persistent
+        series' long-run variance, so every standard error built on this rule
+        errs *low*. That is a property of the rule, not a defect, and it is
+        pinned here so it stays stated rather than discovered.
+        """
+        rng = np.random.default_rng(2026)
+        recovered = {}
+        for rho in (0.0, 0.5, 0.9):
+            n = 200_000
+            shocks = rng.standard_normal(n)
+            series = np.zeros(n)
+            for t in range(1, n):
+                series[t] = rho * series[t - 1] + shocks[t]
+            answer = analysis.hac_mean_se(series)
+            long_run = answer["se"] ** 2 * answer["n"]
+            recovered[rho] = long_run * (1.0 - rho) ** 2
+
+        assert recovered[0.0] == pytest.approx(1.0, rel=0.05)
+        assert recovered[0.5] == pytest.approx(1.0, rel=0.10)
+        assert 0.5 < recovered[0.9] < 0.75
+        assert recovered[0.0] > recovered[0.5] > recovered[0.9]
+
     def test_it_is_never_negative_under_the_bartlett_kernel(self) -> None:
         """A truncated (unweighted) estimator can return a negative long-run
         variance and then a NaN standard error. Bartlett's weights cannot."""
