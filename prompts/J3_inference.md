@@ -5,6 +5,60 @@
 **Prerequisite:** J1 and J2 have run. **Read `docs/P3_ANALYSIS_ASSUMPTIONS.md` and J2's pairwise-complete matrices** rather than re-deriving either, and say so. If J1 reported an inert or leaking canary on any model, or J2 found a coding defect behind the fallbacks, stop and say so instead of proceeding.
 **Terminal:** the main integration checkout (the one that ran the primary grid), on branch `feat/p3-analysis`, branched from an up-to-date `main`.
 
+---
+
+## STOP — four amendments from J2, one of which threatens every p-value below
+
+### 1. The HAC standard errors are lower bounds, and DM inherits that
+
+J2 used the fixed rule `floor(4(n/100)^(2/9))` — bandwidth 9 on equities, 8 on crypto — and then did the right thing: it validated the estimator against a known AR(1) long-run variance. It recovers **99% / 94% / 60% of the truth at ρ = 0 / 0.5 / 0.9**. J2's own conclusion, correct: *these SEs are lower bounds.*
+
+Volatility loss differentials are strongly persistent, so on the comparisons this paper is about the estimator is nearer the 60% end than the 99% end. **A DM denominator that is 60% of the truth inflates every statistic and makes every p-value too small.** Nothing downstream catches this — the matrices look entirely normal. Treat it as the single largest threat to §1's validity.
+
+Required:
+
+- **Pre-whiten before applying the HAC.** Fit an AR(1) to each loss differential, apply the kernel estimator to the residuals, then recolour (the Andrews–Monahan construction). This is the standard remedy for exactly this failure and it is not optional here.
+- **Use a data-driven bandwidth** — Andrews (1991) or the Newey–West (1994) plug-in — not the fixed n-only rule. Report the chosen bandwidth per pair, or its distribution.
+- **Report the first-order autocorrelation ρ̂₁ of each pair's loss differential.** It is the diagnostic that says how much the correction is doing.
+- **Report an effective sample size alongside n.** At ρ = 0.9 the effective n for a mean is roughly `n(1−ρ)/(1+ρ)` — about 260 for a 4,900-origin asset. Printing `n = 4,904` alone, when the differential carries that much dependence, overstates the evidence by an order of magnitude. Print both.
+- **Sensitivity ladder, reported:** re-run the DM matrices at the fixed rule, at the automatic bandwidth, and at twice the automatic bandwidth. Report **how many pairs change significance at 5%** between them. If that count is large, say so plainly — it is a finding about the inference, not a nuisance.
+- **Cross-check the MCS.** The Politis–White automatic block length is data-driven and should handle persistence better than the fixed rule did, but verify it: compare each chosen block length against that series' measured ρ̂₁. A short block on a highly persistent loss series means the rule has failed, not answered.
+
+### 2. Crisis windows: do not move them
+
+Two edge effects surfaced in J2, and both are traps.
+
+Thirteen of the 38 GARCH fallbacks sit inside the span `stress_2025_26` names and **deliberately leaves undated**; DIA's fallback cluster sits at 2008-07-23 and 2008-08-21, just *outside* a GFC window that opens 2008-09-01.
+
+**Do not date `stress_2025_26` and do not widen the GFC window.** Choosing crisis boundaries after seeing where results fall is selection on the outcome, and it would contaminate the headline. Instead:
+
+- Headline crisis tables use the **pre-registered windows exactly as the codebase defines them.**
+- `stress_2025_26` stays undated and is **excluded from the headline**, labelled as an unset window rather than an absence of stress.
+- Report a **robustness check** with a wider GFC definition (e.g. opening 2007-07-01) alongside, clearly marked as sensitivity, never as the headline.
+- State the window definitions and their source in the output, so a reader can see they were fixed in advance.
+
+### 3. One measurement that could shrink a paper-level caveat — and it needs no model
+
+At BTC-USD's fifteen `garch11_t` fallback origins, **the nearest converged fit has α+β = 1.000000000 at 14 of 15** — nine zeros, so the persistence constraint is binding on the *converged* fits too, not only the failures. If those boundary fits are already numerically near-EWMA (a GARCH pinned at α+β = 1 with small ω essentially is), then falling back to EWMA on 11% of that cell changes far less than the rate suggests, and D-033's heaviest caveat softens.
+
+**Both series are already in the store**, so this is a comparison of stored forecasts, not a model run:
+
+- Compare BTC-USD `garch11_t` forecasts against BTC-USD `ewma` forecasts at the same origins. Report the distribution of the ratio — median, IQR, and the tails — split by whether the governing fit was boundary-pinned.
+- Report **how many of BTC's 133 `garch11_t` fits have α+β within 1e-6 of 1**, not just the 15 fallbacks.
+- Do the same for BTC `garch11`, which had zero fallbacks. If it is also boundary-pinned, the phenomenon is the asset, not the specification.
+
+Report the numbers. Do not draw the conclusion.
+
+### 4. Verify two things before you build on J2's tables
+
+The J2 amendments asked for both, and neither is visible in its chat report — they may be in the files. Confirm, and compute them yourself if they are missing:
+
+- **Every QLIKE figure reported twice, with and without the five near-zero target rows** that contribute up to 1.01% of a cell's QLIKE sum from five observations.
+- **AutoARIMA's non-convergence rate (2,334 / 2,366 = 98.6%) carried in the loss tables**, the way the GARCH fallback rates are.
+
+Also note: the authoritative grid manifest is **`data/grid_primary/manifest_fix.json`**, not the stale `docs/P3_GRID_manifest.json`. It is under `data/` and therefore uncommitted — use it, and say in your report that you did, because a clean checkout currently cannot tell which fragment set is current.
+
+---
 **Session:** start this as a **fresh, separately named** Claude Code session (`claude -n vb-<this-prompt>`). Do not continue an earlier session — this prompt is written to be self-contained, and a session carrying prior conclusions is the specific failure mode it is designed to avoid.
 
 ---
