@@ -56,7 +56,12 @@ The J2 amendments asked for both, and neither is visible in its chat report — 
 - **Every QLIKE figure reported twice, with and without the five near-zero target rows** that contribute up to 1.01% of a cell's QLIKE sum from five observations.
 - **AutoARIMA's non-convergence rate (2,334 / 2,366 = 98.6%) carried in the loss tables**, the way the GARCH fallback rates are.
 
-Also note: the authoritative grid manifest is **`data/grid_primary/manifest_fix.json`**, not the stale `docs/P3_GRID_manifest.json`. It is under `data/` and therefore uncommitted — use it, and say in your report that you did, because a clean checkout currently cannot tell which fragment set is current.
+**This has since been fixed — ignore any earlier instruction to the contrary.** Prompts M and N promoted, annotated and de-identified the manifest, so **`docs/P3_GRID_manifest.json` is now the authoritative one**, committed, carrying `manifest_digest` `4559a703…` and `store_digest` `05efdb45…`. `loss_tables`, `defect_tables` and `convergence_forensics` already default to it. Use that default, and report the `manifest_digest` you actually read — if it is not `4559a703…`, stop, because you are on a branch that predates N.
+
+### 5. Two constraints from N that apply to everything you write
+
+- **A committed test now fails the build when a tracked file contains an identifying path or address** (`tests/test_identity_leakage.py`): POSIX and Windows home directories, and email-address shapes. Reviewing for this journal is double-blind, so anything you write into `docs/` must not carry `/home/<user>/`, `C:\Users\<user>\`, or an address — including inside pasted console output, tracebacks and file listings. Run that test before you commit, not after.
+- **An order statistic derived from licensed market data must not be committed.** N established the rule while refusing to commit `docs/P3_CONVERGENCE_FITS.parquet`: aggregates over a window (mean, std, kurtosis, skew) are publishable; a `max`, a `min` or any single realised observation reproduced verbatim is not, because a sequence of them over overlapping windows discloses actual return magnitudes and brackets their dates. This binds your outputs too — report extrema as **ratios, counts or ranks**, never as values.
 
 ---
 **Session:** start this as a **fresh, separately named** Claude Code session (`claude -n vb-<this-prompt>`). Do not continue an earlier session — this prompt is written to be self-contained, and a session carrying prior conclusions is the specific failure mode it is designed to avoid.

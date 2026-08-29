@@ -1,13 +1,12 @@
 # Prompt N — Four repo-hygiene items, none of which moves a number
 
-**Terminal:** the main integration checkout, on a new branch off `feat/p3-analysis`:
+**Branch: stay on `fix/manifest-provenance`** — the branch Prompt M pushed at `c8979bb`. Do **not** branch from `feat/p3-analysis`: items 2 and 4 depend on the promoted `docs/P3_GRID_manifest.json`, the `docs/archive/` tree and `volbench.benchmarks.manifest_provenance`, all of which exist only here.
 
-```bash
-git switch feat/p3-analysis && git pull
-git switch -c fix/repo-hygiene
-```
+**Session: continue in M's session if it is still open.** This deliberately reverses the usual one-prompt-one-session rule, and the reason is specific — three of the four items below are M's own §7 findings, and item 4 edits the manifest M created, using the digest recipe M defined, updating the documents M wrote the citations into. The session holding that context is the right one to do it.
 
-**Session:** fresh and separately named — `claude -n vb-n-hygiene`. Run `/effort high`.
+If M's session has closed, start `claude -n vb-n-hygiene` on `fix/manifest-provenance` and read `docs/P3_MANIFEST_INVENTORY.md` and `docs/P3_MANIFEST_PROVENANCE.md` (or whatever M named its report) before touching anything.
+
+Run `/effort high`.
 
 **Scope rule:** nothing here changes a forecast, a score, or a config hash. If a change would, stop and report instead of making it. Task 4 is the exception in one narrow respect, and it says so.
 
@@ -20,6 +19,8 @@ git switch -c fix/repo-hygiene
 Add `"fix/**"` to the push trigger. The workflow file's own comment already explains why the list exists: this project merges feature branches without pull requests, so the push trigger *is* the CI gate. `fix/**` was omitted because no such branch existed when the list was written, not by intent.
 
 Pushing this change should self-trigger, since GitHub evaluates the workflow file at the pushed commit. Confirm it actually ran rather than assuming — that is the whole lesson here.
+
+Useful side effect: because this branch descends from M's commit, the first CI run also becomes the first CI any of M's work has had. If something in M breaks on 3.12 or 3.13, it surfaces here. Report that outcome separately from N's own changes, so the two are not confused.
 
 `m2/**` is dead now that Phase 2 is complete. Leave it; a separate concern, and removing it in this commit muddies the record.
 
@@ -70,3 +71,5 @@ Give it an inert-proof, as M's guard has: a fixture containing a home path, asse
 Per task: what changed, and the evidence it changed nothing it should not have. Specifically — CI confirmed to have actually run on this branch; the byte-for-byte reproduction from task 2; the column enumeration from task 3; the shape-based patterns, the inert-proof result, the full list of identity leaks found, and the old/new `manifest_digest` pair from task 4.
 
 Full gate on all three interpreters, `ruff`, `mypy --strict`, and the resumability re-run showing 143 cached with nothing rewritten. Push the branch; do not merge.
+
+State explicitly whether CI passed on M's changes as well as N's — that is the first time either has been seen by CI, and it is the more informative of the two results.
