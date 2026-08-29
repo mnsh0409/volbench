@@ -32,6 +32,18 @@ exception that drops it from the grid. A fit that fell back is no longer
 silent: `fit_diagnostics()` reports it, the evaluator records it per row in
 `fit_status`, and the runner counts it per cell (D-032).
 
+What a fallback retains, and why it retains it: the optimizer's terminal
+state — the parameter vector it stopped at, its final log-likelihood, its
+exit flag and message, and the box bounds it was run against — is kept on
+:class:`TerminalFit` for *every* scheduled fit, converged or not. Until
+this was added a fit that fell back discarded `result` outright, so the
+only surviving evidence about it was the exit flag in `fit_status`, and
+the question "which parameter was at which bound when SLSQP stopped?" was
+not answerable from any artifact — only guessable. `terminal` is never
+hashed, never in `spec()`, and never read by `predict` or `update`; it
+changes no number and moves no config hash. Like `detail` it describes the
+*scheduled* fit, so `update` carries it forward unchanged.
+
 Identification, and why it is a reproducibility matter (D-032): `nu` is
 bounded to `NU_BOUNDS = (2.1, 50)` and SLSQP is run at `FIT_TOL = 1e-10`.
 Both are hyperparameters in `spec()`, so they are in the config hash. The
@@ -83,7 +95,7 @@ from volbench.dist import Distribution, Normal, StudentT
 from volbench.models.base import FitDiagnostics
 from volbench.models.ewma import EWMA, FittedEWMA
 
-__all__ = ["FIT_TOL", "GARCH", "NU_BOUNDS", "FittedGARCH", "gjr_garch"]
+__all__ = ["FIT_TOL", "GARCH", "NU_BOUNDS", "FittedGARCH", "TerminalFit", "gjr_garch"]
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +157,129 @@ class _BoundedStudentsT(StudentsT):
 
 
 @dataclass(frozen=True)
+class TerminalFit:
+    """Where SLSQP stopped on one scheduled fit, converged or not.
+
+    Every field is read straight off ``arch``'s own result and
+    ``scipy``'s ``OptimizeResult`` underneath it; nothing here is derived,
+    re-estimated or rounded. Held as plain tuples and floats so the whole
+    record pickles across :mod:`volbench.execute`'s process boundary as
+    cheaply as the flag it replaces.
+
+    Attributes
+    ----------
+    params:
+        ``(name, value)`` in ``arch``'s own parameter order, on the
+        **rescaled** series the optimizer saw (see the module docstring):
+        ``omega`` is in units of ``scale ** 2``, and ``alpha``, ``gamma``,
+        ``beta`` and ``nu`` are scale-free. :attr:`omega_on_the_return_scale`
+        undoes it.
+    loglikelihood:
+        The log-likelihood at :attr:`params`, of the rescaled series.
+    convergence_flag:
+        ``arch``'s ``convergence_flag`` — ``scipy``'s SLSQP ``status``. ``0``
+        is convergence; ``8`` is "positive directional derivative for line
+        search".
+    message:
+        SLSQP's own description of :attr:`convergence_flag`.
+    iterations, function_evals:
+        SLSQP's ``nit`` and ``nfev``, which separate a fit that ran out of
+        iterations from one that stopped because it could not descend.
+    scale:
+        The factor ``arch``'s ``rescale=True`` multiplied the returns by.
+    bounds:
+        ``(name, low, high)`` — the box the optimizer was run inside, in the
+        same order as :attr:`params`, so "at a bound" is decidable from this
+        record alone rather than from a re-derivation of ``arch``'s formulas.
+    """
+
+    params: tuple[tuple[str, float], ...]
+    loglikelihood: float
+    convergence_flag: int
+    message: str
+    iterations: int
+    function_evals: int
+    scale: float
+    bounds: tuple[tuple[str, float, float], ...]
+
+    def __post_init__(self) -> None:
+        if len(self.params) != len(self.bounds):
+            raise ValueError(
+                f"{len(self.params)} parameters but {len(self.bounds)} bounds; a bound must "
+                "be recorded for every parameter or 'at a bound' cannot be decided"
+            )
+        for (name, _), (bound_name, _, _) in zip(self.params, self.bounds, strict=True):
+            if name != bound_name:
+                raise ValueError(f"parameter {name!r} is paired with the bound of {bound_name!r}")
+
+    @property
+    def omega_on_the_return_scale(self) -> float:
+        """:attr:`params`' ``omega``, divided back out of ``scale ** 2``."""
+        return dict(self.params)["omega"] / (self.scale**2)
+
+    def slack(self) -> dict[str, tuple[float, float]]:
+        """Per parameter, ``(value - low, high - value)``: distance to each bound.
+
+        Both entries are non-negative for a parameter strictly inside its box.
+        A negative one means the optimizer stopped a hair outside the box,
+        which SLSQP allows within its own constraint tolerance.
+        """
+        return {
+            name: (value - low, high - value)
+            for (name, value), (_, low, high) in zip(self.params, self.bounds, strict=True)
+        }
+
+    def as_dict(self) -> dict[str, Any]:
+        """A flat, JSON-safe record — one row of a forensics table."""
+        record: dict[str, Any] = {
+            "loglikelihood": self.loglikelihood,
+            "convergence_flag": self.convergence_flag,
+            "message": self.message,
+            "iterations": self.iterations,
+            "function_evals": self.function_evals,
+            "scale": self.scale,
+        }
+        for name, value in self.params:
+            record[name] = value
+        for name, low, high in self.bounds:
+            record[f"{name}_low"] = low
+            record[f"{name}_high"] = high
+        return record
+
+
+def _terminal_fit(
+    model: Any, result: ARCHModelResult, resids: NDArray[np.float64]
+) -> TerminalFit:
+    """The optimizer's terminal state, read off ``arch``'s result.
+
+    ``resids`` is the **rescaled** series the optimizer saw, which for a
+    zero-mean model is the series itself: that is what ``arch`` hands its own
+    ``bounds()`` methods, so passing it here reproduces the box SLSQP was run
+    inside rather than approximating it. ``arch`` computes the *distribution's*
+    bounds from standardized residuals instead; both distributions this module
+    uses ignore the argument entirely — ``Normal`` has no parameters and
+    :class:`_BoundedStudentsT` returns :data:`NU_BOUNDS` unconditionally — so
+    the two agree here by construction, and
+    ``tests/test_models_garch.py::TestTerminalFit`` pins that.
+    """
+    optimizer = result.optimization_result
+    bounds = [*model.bounds(), *model.volatility.bounds(resids), *model.distribution.bounds(resids)]
+    names = [str(name) for name in result.params.index]
+    return TerminalFit(
+        params=tuple(zip(names, (float(v) for v in result.params), strict=True)),
+        loglikelihood=float(result.loglikelihood),
+        convergence_flag=int(result.convergence_flag),
+        message=str(getattr(optimizer, "message", "")),
+        iterations=int(getattr(optimizer, "nit", -1)),
+        function_evals=int(getattr(optimizer, "nfev", -1)),
+        scale=float(result.scale),
+        bounds=tuple(
+            (name, float(low), float(high)) for name, (low, high) in zip(names, bounds, strict=True)
+        ),
+    )
+
+
+@dataclass(frozen=True)
 class FittedGARCH:
     name: str
     o: int
@@ -163,6 +298,13 @@ class FittedGARCH:
     #: :meth:`fit_diagnostics` into the results' ``fit_status`` column (D-032).
     #: Never hashed and never read by any code path that produces a number.
     detail: str = ""
+    #: Where the optimizer stopped on the scheduled fit — retained whether or
+    #: not it converged, so a fallback can be diagnosed after the fact instead
+    #: of guessed at (see the module docstring). ``None`` only when ``fit``
+    #: itself raised, since there is then no optimizer result to read. Never
+    #: hashed, never in :meth:`spec`, and never read by :meth:`predict` or
+    #: :meth:`update`.
+    terminal: TerminalFit | None = None
 
     def fit_diagnostics(self) -> FitDiagnostics:
         """How the scheduled fit went (D-032).
@@ -295,12 +437,13 @@ class GARCH:
             raise ValueError(f"train must be a 1-D array with at least {_MIN_TRAIN} returns")
 
         result: ARCHModelResult | None = None
+        terminal: TerminalFit | None = None
         converged = False
         detail = ""
         try:
-            result = self._model(arr).fit(
-                disp="off", show_warning=False, options={"ftol": self.fit_tol}
-            )
+            model = self._model(arr)
+            result = model.fit(disp="off", show_warning=False, options={"ftol": self.fit_tol})
+            terminal = _terminal_fit(model, result, arr * float(result.scale))
             converged = result.convergence_flag == 0
             detail = f"flag={result.convergence_flag}"
             if converged and self.dist == "studentst":
@@ -314,6 +457,7 @@ class GARCH:
         except Exception as exc:
             logger.warning("%s: fit raised, falling back to EWMA", self.name, exc_info=True)
             result = None
+            terminal = None
             converged = False
             detail = f"raised {type(exc).__name__}"
 
@@ -337,6 +481,7 @@ class GARCH:
                 nu_bounds=self.nu_bounds,
                 fit_tol=self.fit_tol,
                 detail=detail,
+                terminal=terminal,
             )
 
         assert result is not None
@@ -352,6 +497,7 @@ class GARCH:
             nu_bounds=self.nu_bounds,
             fit_tol=self.fit_tol,
             detail=detail,
+            terminal=terminal,
         )
 
 

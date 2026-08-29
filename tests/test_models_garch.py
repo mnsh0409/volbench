@@ -6,7 +6,7 @@ import pytest
 from volbench.dist import Normal, StudentT
 from volbench.models import GARCH, gjr_garch
 from volbench.models.ewma import FittedEWMA
-from volbench.models.garch import FIT_TOL, NU_BOUNDS
+from volbench.models.garch import FIT_TOL, NU_BOUNDS, TerminalFit, _BoundedStudentsT
 
 
 def _simulate_garch11(
@@ -199,3 +199,124 @@ class TestGARCHSpec:
             GARCH(o=2)  # type: ignore[arg-type]
         with pytest.raises(ValueError):
             GARCH(dist="gaussian")  # type: ignore[arg-type]
+
+
+class TestTerminalFit:
+    """A fit that fell back used to discard everything but its exit flag.
+
+    The forensic question "which parameter was at which bound when SLSQP
+    stopped?" is not answerable from a flag, and it is the question a flat
+    likelihood surface and a coding defect answer differently. So the
+    optimizer's terminal state is retained on every scheduled fit — which
+    must cost no number, no ``spec()`` field and no config hash.
+    """
+
+    @staticmethod
+    def _clean() -> np.ndarray:
+        rng = np.random.default_rng(4)
+        return rng.standard_normal(400) * 0.01
+
+    def test_a_converged_fit_keeps_the_optimizers_own_numbers(self) -> None:
+        fitted = GARCH(dist="normal").fit(self._clean())
+        terminal = fitted.terminal
+        assert terminal is not None
+        assert fitted.result is not None
+        assert terminal.convergence_flag == 0
+        assert dict(terminal.params) == pytest.approx(dict(fitted.result.params))
+        assert terminal.loglikelihood == pytest.approx(float(fitted.result.loglikelihood))
+        assert terminal.scale == pytest.approx(float(fitted.result.scale))
+        assert terminal.iterations > 0 and terminal.function_evals > 0
+        assert "success" in terminal.message.lower()
+
+    def test_a_fit_that_did_not_converge_keeps_them_too(self) -> None:
+        """The whole point: this one falls back, so ``result`` is None and the
+        terminal state is the only surviving evidence about the optimizer."""
+        fitted = GARCH(dist="normal").fit(np.zeros(300))
+        assert fitted.fallback is True
+        assert fitted.result is None
+        terminal = fitted.terminal
+        assert terminal is not None
+        assert terminal.convergence_flag != 0
+        assert fitted.fit_diagnostics().status() == (
+            f"fallback=ewma|flag={terminal.convergence_flag}"
+        )
+        assert len(terminal.params) == len(terminal.bounds) == 3
+
+    def test_a_fit_that_raised_has_no_terminal_state_to_keep(self) -> None:
+        fitted = GARCH(dist="normal").fit(np.full(300, np.nan))
+        assert fitted.fallback is True
+        assert fitted.terminal is None
+        assert fitted.fit_diagnostics().status().startswith("fallback=ewma|raised ")
+
+    def test_every_parameter_carries_the_box_it_was_optimized_inside(self) -> None:
+        fitted = gjr_garch(dist="normal").fit(self._clean())
+        terminal = fitted.terminal
+        assert terminal is not None
+        assert [name for name, _ in terminal.params] == ["omega", "alpha[1]", "gamma[1]", "beta[1]"]
+        assert [name for name, _, _ in terminal.bounds] == [name for name, _ in terminal.params]
+        for name, (below, above) in terminal.slack().items():
+            assert below >= -1e-8 and above >= -1e-8, name
+
+    def test_the_student_t_box_recorded_is_the_one_the_optimizer_was_given(self) -> None:
+        """``arch`` computes a distribution's bounds from *standardized*
+        residuals and the volatility process's from the raw ones; this module
+        records both from the raw ones, which is only sound because the two
+        distributions it uses ignore the argument. Pinned, because a future
+        distribution that reads it would make the recorded box a fiction."""
+        resids = self._clean()
+        assert _BoundedStudentsT(NU_BOUNDS).bounds(resids) == [NU_BOUNDS]
+        assert _BoundedStudentsT(NU_BOUNDS).bounds(resids * 1e6) == [NU_BOUNDS]
+
+        fitted = GARCH(dist="studentst").fit(resids)
+        assert fitted.terminal is not None
+        assert fitted.terminal.bounds[-1] == ("nu", *NU_BOUNDS)
+
+    def test_omega_is_recorded_on_the_rescaled_series_and_can_be_undone(self) -> None:
+        """``rescale=True`` means ``omega`` is in units of ``scale ** 2`` — the
+        one place in this record where a reader can mistake a scale for a
+        finding. The same returns in different units give the same fit."""
+        returns = self._clean()
+        one = GARCH(dist="normal").fit(returns).terminal
+        ten = GARCH(dist="normal").fit(returns * 10.0).terminal
+        assert one is not None and ten is not None
+        assert ten.scale == pytest.approx(one.scale / 10.0)
+        assert dict(ten.params)["alpha[1]"] == pytest.approx(dict(one.params)["alpha[1]"], rel=1e-5)
+        assert ten.omega_on_the_return_scale == pytest.approx(
+            100.0 * one.omega_on_the_return_scale, rel=1e-5
+        )
+
+    def test_re_conditioning_carries_the_scheduled_fits_terminal_state(self) -> None:
+        """Same rule as ``detail``: ``update`` runs no optimizer, so it has no
+        terminal state of its own to report."""
+        train = self._clean()
+        fitted = GARCH(dist="normal").fit(train)
+        assert fitted.update(train).terminal is fitted.terminal
+
+    def test_retention_is_not_in_the_spec_and_so_moves_no_config_hash(self) -> None:
+        fitted = GARCH(dist="normal").fit(self._clean())
+        assert "terminal" not in fitted.spec()
+        assert fitted.spec() == GARCH(dist="normal").spec()
+
+    def test_a_bound_must_be_paired_with_its_own_parameter(self) -> None:
+        with pytest.raises(ValueError, match="bounds"):
+            TerminalFit(
+                params=(("omega", 1.0), ("alpha[1]", 0.1)),
+                loglikelihood=-1.0,
+                convergence_flag=0,
+                message="",
+                iterations=1,
+                function_evals=1,
+                scale=1.0,
+                bounds=(("omega", 0.0, 1.0),),
+            )
+        with pytest.raises(ValueError, match="paired with the bound"):
+            TerminalFit(
+                params=(("omega", 1.0),),
+                loglikelihood=-1.0,
+                convergence_flag=0,
+                message="",
+                iterations=1,
+                function_evals=1,
+                scale=1.0,
+                bounds=(("alpha[1]", 0.0, 1.0),),
+            )

@@ -70,6 +70,8 @@ from volbench.results import ResultsStore
 __all__ = [
     "CELL_KEY",
     "EXCEPTION_STAGES",
+    "HAC_BANDWIDTH_RULE",
+    "LOSS_ORDER",
     "NU_BOUNDS",
     "SCORE_REASONS",
     "AlignmentCheck",
@@ -78,11 +80,17 @@ __all__ = [
     "alignment_check",
     "alignment_table",
     "cell_index",
+    "fallback_rates",
     "forecast_floor_report",
+    "fz0_column",
+    "fz0_loss",
+    "hac_bandwidth",
+    "hac_mean_se",
     "level_tags",
     "load_grid",
     "load_manifest",
     "loss_columns",
+    "loss_table",
     "missing_accounting",
     "nonfinite_report",
     "normal_crps",
@@ -95,6 +103,7 @@ __all__ = [
     "student_t_crps",
     "student_t_df_from_quantile_ratio",
     "student_t_scale_from_variance",
+    "with_derived_losses",
 ]
 
 #: What identifies one cell of the grid in the manifest. ``model`` here is the
@@ -313,6 +322,43 @@ def missing_accounting(grid: GridFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def fallback_rates(grid: GridFrame) -> pd.DataFrame:
+    """Per asset x model: scheduled fits, fallbacks, and the rate as ``k/n``.
+
+    ``fit_status`` describes the *scheduled fit* a row rests on, not the row
+    (docs/P3_ANALYSIS_ASSUMPTIONS.md §5), so the per-fit view is the first
+    status of each ``fit_origin`` group and counting rows would multiply every
+    fit by the length of its refit block.
+
+    ``n_fits`` is ``<NA>`` — never ``0`` — for a model whose adapter
+    implements no ``fit_diagnostics``, and the ``instrumented`` column says
+    which. Ten of the thirteen configs are in that state, and a table printing
+    ``0`` for them would say "never failed" where the truth is "never
+    measured" (docs/P3_INSTRUMENTATION_GAP.md).
+    """
+    rows: list[dict[str, Any]] = []
+    for (asset, model), group in grid.groupby(["asset", "model_label"], observed=True, sort=True):
+        scheduled = group.loc[group["fit_origin"] >= 0]
+        status = scheduled.groupby("fit_origin")["fit_status"].first().astype(str)
+        status = status[status != ""]
+        n_fits = int(status.size)
+        fallback = int(status.str.startswith("fallback=").sum())
+        rows.append(
+            {
+                "asset": asset,
+                "model": model,
+                "instrumented": n_fits > 0,
+                "n_fits": n_fits if n_fits else pd.NA,
+                "n_fallback": fallback if n_fits else pd.NA,
+                "rate": (fallback / n_fits) if n_fits else pd.NA,
+                "n_nonconverged": (
+                    int((~status.str.startswith("ok")).sum()) if n_fits else pd.NA
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 # --------------------------------------------------------------------------
 # finiteness
 # --------------------------------------------------------------------------
@@ -422,6 +468,180 @@ def forecast_floor_report(grid: GridFrame) -> pd.DataFrame:
                 "ratio_min": float(ratio.min()) if ratio.size else math.nan,
             }
         )
+    return pd.DataFrame(rows)
+
+
+# --------------------------------------------------------------------------
+# loss tables: FZ0, HAC standard errors, per-asset means
+# --------------------------------------------------------------------------
+
+
+def fz0_loss(realized_return: float, var: float, es: float, level: float) -> float:
+    """Elementwise FZ0 joint (VaR, ES) loss — Patton, Ziegel & Chen (2019) eq. 6.
+
+    ``L(Y, v, e; a) = -(1/(a e)) 1{Y <= v} (v - Y) + v/e + log(-e) - 1``, with
+    ``Y`` the realized return, ``v`` the ``a``-quantile of the predictive
+    return law and ``e`` the mean below it. Written out here from the paper
+    rather than imported from :mod:`volbench.backtests`, for the reason the
+    module docstring gives: a recomputation that calls the implementation
+    under test checks only that it is deterministic.
+
+    Its domain is the paper's: ``e < 0`` (the log term) and ``e <= v``
+    (consistency, their footnote 1). Both raise rather than returning a number,
+    because the usual way to violate them is a sign-convention bug. The whole
+    grid was checked against both before this was used (J1 §2).
+    """
+    if not 0.0 < level < 1.0:
+        raise ValueError("level must lie strictly inside (0, 1)")
+    if not es < 0.0:
+        raise ValueError(
+            "FZ0 needs an ES forecast strictly below zero (return-side sign convention)"
+        )
+    if es > var:
+        raise ValueError("FZ0 needs ES <= VaR (the mean below a quantile cannot exceed it)")
+    shortfall = (var - realized_return) if realized_return <= var else 0.0
+    return -shortfall / (level * es) + var / es + math.log(-es) - 1.0
+
+
+def fz0_column(frame: pd.DataFrame, level: float) -> NDArray[np.float64]:
+    """FZ0 at ``level`` for every row, vectorized, NaN where any input is not finite.
+
+    The scalar :func:`fz0_loss` is the definition and this is the same
+    arithmetic over arrays; ``tests/test_analysis.py`` pins them equal, so the
+    fast path cannot drift from the one written out from the paper.
+    """
+    tag = _level_tag(level)
+    y = frame["realized_return"].to_numpy(dtype=np.float64)
+    v = frame[f"var_{tag}"].to_numpy(dtype=np.float64)
+    e = frame[f"es_{tag}"].to_numpy(dtype=np.float64)
+    finite = np.isfinite(y) & np.isfinite(v) & np.isfinite(e)
+    pair = np.isfinite(v) & np.isfinite(e)
+    if np.any(e[np.isfinite(e)] >= 0.0) or np.any(e[pair] > v[pair]):
+        raise ValueError(f"FZ0 domain violated at level {level}: some ES >= 0 or ES > VaR")
+    out = np.full(y.shape, np.nan)
+    yy, vv, ee = y[finite], v[finite], e[finite]
+    shortfall = np.where(yy <= vv, vv - yy, 0.0)
+    out[finite] = -shortfall / (level * ee) + vv / ee + np.log(-ee) - 1.0
+    return out
+
+
+def with_derived_losses(grid: GridFrame, levels: Sequence[float] | None = None) -> GridFrame:
+    """``grid`` plus the losses that are recomputable but not stored.
+
+    Adds ``fz0_<tag>`` at each level, ``fz0_avg`` and ``pinball_avg``. The two
+    averages are the unweighted mean **across levels of one row**, which is a
+    different object from the mean across rows and is named so it cannot be
+    mistaken for one.
+    """
+    tags = level_tags(grid) if levels is None else [_level_tag(level) for level in levels]
+    frame = grid.copy()
+    for tag in tags:
+        frame[f"fz0_{tag}"] = fz0_column(frame, _tag_to_level(tag))
+    frame["fz0_avg"] = frame[[f"fz0_{tag}" for tag in tags]].mean(axis=1)
+    frame["pinball_avg"] = frame[[f"pinball_{tag}" for tag in tags]].mean(axis=1)
+    return frame
+
+
+#: How the Bartlett kernel's truncation lag is chosen when none is given:
+#: ``floor(4 (n/100)^(2/9))``, the deterministic rule of thumb that follows
+#: Newey & West (1994) and is what most software uses as its default. Stated
+#: rather than left implicit, because a HAC standard error is a statement about
+#: a bandwidth as much as about the data.
+HAC_BANDWIDTH_RULE: Final = "floor(4 * (n / 100) ** (2 / 9)), Bartlett kernel"
+
+
+def hac_bandwidth(n: int) -> int:
+    """The truncation lag :data:`HAC_BANDWIDTH_RULE` gives for ``n`` observations."""
+    if n < 2:
+        return 0
+    return int(4.0 * (n / 100.0) ** (2.0 / 9.0) // 1.0)
+
+
+def hac_mean_se(values: NDArray[np.float64], bandwidth: int | None = None) -> dict[str, Any]:
+    """Newey-West standard error of the sample mean of ``values``.
+
+    ``sqrt(omega / n)`` with ``omega = gamma_0 + 2 sum_{j=1}^{L} (1 - j/(L+1))
+    gamma_j``, the Bartlett-kernel long-run variance. The kernel's weights make
+    ``omega`` non-negative by construction, so this cannot return a NaN from a
+    negative variance the way a truncated (unweighted) estimator can.
+
+    **Non-finite values are dropped and the remainder treated as adjacent.**
+    A loss series with an unscorable day in it has a hole, and a HAC estimator
+    has no way to represent one: lag ``j`` after the hole spans more than ``j``
+    days. The alternative — treating the hole as a zero deviation — would bias
+    the autocovariances toward zero, which is worse and silent. ``n_dropped``
+    is returned so the size of the approximation is visible next to the number
+    it affects.
+    """
+    array = np.asarray(values, dtype=np.float64)
+    finite = np.isfinite(array)
+    x = array[finite]
+    n = int(x.size)
+    result: dict[str, Any] = {
+        "n": n,
+        "n_dropped": int(array.size - n),
+        "mean": float(x.mean()) if n else math.nan,
+        "bandwidth": 0,
+        "se": math.nan,
+        "se_iid": math.nan,
+    }
+    if n < 2:
+        return result
+    lag = hac_bandwidth(n) if bandwidth is None else int(bandwidth)
+    lag = max(0, min(lag, n - 1))
+    centered = x - x.mean()
+    gamma0 = float(centered @ centered) / n
+    omega = gamma0
+    for j in range(1, lag + 1):
+        gamma_j = float(centered[j:] @ centered[:-j]) / n
+        omega += 2.0 * (1.0 - j / (lag + 1.0)) * gamma_j
+    result["bandwidth"] = lag
+    result["se"] = math.sqrt(max(omega, 0.0) / n)
+    result["se_iid"] = math.sqrt(gamma0 / (n - 1))
+    return result
+
+
+#: The losses a per-asset table reports, in the order it reports them.
+LOSS_ORDER: Final = (
+    "crps",
+    "log_score",
+    "pinball_0p01",
+    "pinball_0p025",
+    "pinball_0p05",
+    "pinball_avg",
+    "qlike",
+    "fz0_0p01",
+    "fz0_0p025",
+    "fz0_0p05",
+    "fz0_avg",
+)
+
+
+def loss_table(grid: GridFrame, asset: str, *, losses: Sequence[str] = LOSS_ORDER) -> pd.DataFrame:
+    """One asset's per-model mean loss, HAC standard error and ``n``.
+
+    One row per (model, loss). ``grid`` must already carry the derived columns
+    (:func:`with_derived_losses`). Rows are ordered by origin before the HAC
+    estimator sees them, because a long-run variance computed on a frame in
+    some other order is a number about that order.
+
+    Nothing is aggregated across assets, and this function cannot be made to:
+    equities score against an overnight-plus-range variance target and crypto
+    against 5-minute realized variance, so a mean over the eleven would be a
+    mean over two different units.
+    """
+    cell = grid.loc[grid["asset"] == asset]
+    if cell.empty:
+        raise ValueError(f"no rows for asset {asset!r}")
+    rows: list[dict[str, Any]] = []
+    for model, group in cell.groupby("model_label", observed=True, sort=True):
+        ordered = group.sort_values("origin_index", kind="stable")
+        origins = int(ordered["origin_index"].nunique())
+        for loss in losses:
+            summary = hac_mean_se(ordered[loss].to_numpy(dtype=np.float64))
+            rows.append(
+                {"asset": asset, "model": model, "loss": loss, "origins": origins, **summary}
+            )
     return pd.DataFrame(rows)
 
 
