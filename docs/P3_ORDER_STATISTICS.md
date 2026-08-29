@@ -112,7 +112,7 @@ through one gate.
 
 | piece | what it does |
 |---|---|
-| `COLUMN_POLICY` | 52 columns, each tagged. `max_abs_return` is the only `order_statistic` |
+| `COLUMN_POLICY` | 57 columns, each tagged. `max_abs_return` is the only `order_statistic` |
 | `unpublishable_columns` | order statistics **and untagged columns** — fail closed, so a column added later cannot reach a report by nobody having thought about it |
 | `refuse_unpublishable` | raises `OrderStatisticError` naming the columns |
 | `publishable` | drops the order statistics, then still runs the check, so the convenience cannot become a bypass |
@@ -140,10 +140,19 @@ written rather than refused.
 ## 4. What the tables were regenerated from
 
 The existing `docs/P3_CONVERGENCE_FITS.parquet`, on disk from the earlier run.
-**Nothing was re-fitted and no store was touched.** Every column of T4, T5 and
-T6 other than the window-maximum column reproduces the committed table
+**Nothing was re-fitted and no store was touched** — all 374 files of
+`data/grid_primary/store/` are identical in SHA-256, size and mtime to before
+this branch.
+
+Every column other than the redacted one reproduces the committed table
 character for character, which is the check that the regeneration is faithful
-rather than a fresh computation wearing the old numbers' clothes.
+rather than a fresh computation wearing the old numbers' clothes:
+
+| table | checked | result |
+|---|---|---|
+| T4 | 8 rows | 7 byte-identical; the 8th is the row that was replaced |
+| T5 | 23 rows × 10 remaining columns | **0 differences** |
+| T6 | 15 rows × 8 remaining columns | **0 differences**, and every new ratio equals `ETH_max / BTC_max` of the two values it replaced to 4 dp |
 
 The parquet itself was then projected in place — the working frame with
 `max_abs_return` written to `data/grid_primary/convergence_fits_full.parquet`,
