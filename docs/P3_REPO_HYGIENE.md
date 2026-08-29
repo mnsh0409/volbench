@@ -61,6 +61,13 @@ docs/` reported nothing at all:
 | `docs/P3_PAIRWISE_COMPLETE.md` | `09365179 8ff85d16…` | identical |
 | `docs/P3_PAIRWISE_COMPLETE.csv` | `3d5bdc7f1bfbf8fc…` | identical |
 
+`benchmarks.defect_tables` writes no file — it prints and returns L's
+acceptance status — so it was run as a second check rather than diffed: against
+the new default it still reports `acceptance (11 assets): PASS`, with panel
+medians `smear_shipped 1.703` against `smear_realized 1.678`, the same numbers
+L certified. `benchmarks.convergence_forensics` was not re-run: it re-fits all
+7,101 GARCH-family fits, and §3 leaves its output uncommitted in any case.
+
 Only then were the defaults and the documents' provenance prose changed, and
 the grid regenerated. **Both CSVs — every number — stayed byte-identical**; the
 only diffs in the regenerated markdown are the `| Grid |` provenance rows and
@@ -128,6 +135,15 @@ worked around. Two things would have to happen before it can be committed:
 
 The file is now untracked-and-visible rather than untracked-and-hidden, which is
 the part of the task that was safe to finish.
+
+**One live consequence, stated so it is not a surprise:** until `max_abs_return`
+is dealt with, a `git add -A` in this repository *will* stage
+`docs/P3_CONVERGENCE_FITS.parquet`, and the licensing guard will fail with
+`data-shaped files are tracked: ['docs/P3_CONVERGENCE_FITS.parquet']`. That is
+the guard working — it is the only thing standing between a convenience command
+and a licensing breach — but it is friction that lasts exactly as long as the
+column does. Re-adding a targeted ignore would remove the friction by restoring
+the hiding this task removed, so it was not done.
 
 ## 4. Identity leakage: a committed, shape-based test — and what it found
 
@@ -254,4 +270,17 @@ The 3.11 leg carries the `tsfm` extra and 29 rather than 35 skips because the
 foundation-model adapter tests can import their backends there; the extra six
 skips on 3.12/3.13 are those tests, which have no torch in those venvs.
 
-CI: PLACEHOLDER_CI
+**CI ran, and this is the whole point of §1.** The push of `5e3641e` to this
+`fix/**` branch triggered the workflow at that commit, where before the same
+query returned `total_count: 0`:
+
+```
+$ gh api repos/<repo>/commits/5e3641ea.../check-runs
+  test (3.11)    completed  success   08:24:41Z -> 08:42:28Z
+  test (3.12)    completed  success   08:24:41Z -> 08:43:17Z
+  test (3.13)    completed  success   08:24:41Z -> 08:36:44Z
+```
+
+Three legs, `--extra classical --extra torch-cpu`, all green. Confirmed against
+the Actions API rather than assumed — which is the lesson the two branches that
+shipped without it paid for.

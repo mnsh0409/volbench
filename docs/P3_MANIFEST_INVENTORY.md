@@ -274,19 +274,18 @@ later, these are recorded, not fixed:
   could be committed too. They are also fully derivable from the manifest and
   the store, which is why they were not moved with it. Nothing points at them
   from a committed document.
-- **Four analysis entry points still name a manifest by a path of their own.**
-  `benchmarks.loss_tables`, `benchmarks.defect_tables` and
-  `benchmarks.convergence_forensics` each default `--manifest` to
-  `data/grid_primary/manifest_fix.json` — gitignored, so a clean checkout
-  cannot run them even though the file they want is now committed a directory
-  away. Repointing all three at `docs/P3_GRID_manifest.json` would change no
-  number: the two files have the same `manifest_digest` (`4559a703`), so they
-  name the same 143 cells in the same order. `benchmarks.tsfm_distribution_probe`
-  already defaults to `docs/P3_GRID_manifest.json`, which means its default
-  silently changed meaning today, from the pre-fix grid to the post-fix one —
-  correct now, but worth knowing before anyone re-runs it and compares against
-  docs/P3_TSFM_VARIANCE_AUDIT.md, which K measured on the pre-fix cells.
-  All four are one-line changes and none is this prompt's.
+- ~~**Four analysis entry points still name a manifest by a path of their
+  own.**~~ **Closed by docs/P3_REPO_HYGIENE.md §2.** `benchmarks.loss_tables`,
+  `benchmarks.defect_tables` and `benchmarks.convergence_forensics` defaulted
+  `--manifest` to the gitignored `data/grid_primary/manifest_fix.json`, so a
+  clean checkout could not run them even though the file they wanted was
+  committed a directory away; all three now read `docs/P3_GRID_manifest.json`,
+  and re-running `loss_tables` reproduced its four committed outputs
+  byte-for-byte. `benchmarks.tsfm_distribution_probe` already defaulted to the
+  committed path, so its default changed meaning when that file was promoted —
+  from the pre-fix grid to the post-fix one — and
+  docs/P3_TSFM_VARIANCE_AUDIT.md now says at the top which grid it was
+  measured on.
 - **`docs/P3_CONVERGENCE_FITS.parquet` is untracked**, caught by `.gitignore`'s
   blanket `*.parquet` rather than by the root-anchored `/data/` rule. It is a
   committed document's evidence file that cannot currently be committed. This
