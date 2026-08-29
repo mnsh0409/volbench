@@ -55,6 +55,19 @@ Appendix B.
 Künsch, H. R. (1989). The jackknife and the bootstrap for general stationary
 observations. *Annals of Statistics* 17(3), 1217-1241 (moving block bootstrap).
 
+Andrews, D. W. K. (1991). Heteroskedasticity and autocorrelation consistent
+covariance matrix estimation. *Econometrica* 59(3), 817-858 (the AR(1)
+plug-in bandwidth, eq. 6.4, and the Bartlett kernel's 1.1447 (alpha(1) T)^{1/3}).
+
+Andrews, D. W. K. & Monahan, J. C. (1992). An improved heteroskedasticity and
+autocorrelation consistent covariance matrix estimator. *Econometrica* 60(4),
+953-966 (AR(1) pre-whitening and recolouring; the 0.97 cap on the coefficient).
+
+Hansen, P. R., Lunde, A. & Nason, J. M. (2003), as above, and Hansen, P. R. &
+Lunde, A. (2005). A forecast comparison of volatility models: does anything
+beat a GARCH(1,1)? *Journal of Applied Econometrics* 20(7), 873-889 (the
+semi-quadratic statistic ``T_SQ = sum_{i<j} t_ij^2``).
+
 Politis, D. N. & White, H. (2004). Automatic block-length selection for the
 dependent bootstrap. *Econometric Reviews* 23(1), 53-70; correction: Patton,
 A., Politis, D. N. & White, H. (2009), *Econometric Reviews* 28(4), 372-375.
@@ -78,22 +91,34 @@ from volbench.results import ResultsStore, array_digest, config_hash, package_ve
 __all__ = [
     "DEFAULT_ALPHA",
     "DEFAULT_N_BOOT",
+    "MAX_PREWHITEN_RHO",
     "Alternative",
     "DMMatrix",
     "DMResult",
+    "HACSpec",
     "Kernel",
+    "LongRunVariance",
     "LossMatrix",
     "MCSResult",
     "MCSStatistic",
     "MissingPolicy",
     "ModelComparison",
+    "andrews_bandwidth",
+    "ar1_block_length",
+    "ar1_coefficient",
+    "autocorrelation",
+    "bootstrap_column_means",
     "compare_models",
     "default_block_length",
     "diebold_mariano",
     "dm_matrix",
+    "effective_sample_size",
+    "long_run_variance",
     "loss_matrix",
     "model_confidence_set",
     "moving_block_indices",
+    "politis_white_block_length",
+    "rule_of_thumb_bandwidth",
 ]
 
 #: MCS confidence level complement, per docs/metrics_reference.md.
@@ -113,8 +138,13 @@ Kernel = Literal["rectangular", "bartlett"]
 Alternative = Literal["two-sided", "less", "greater"]
 #: ``"range"`` — ``T_R = max_{i,j} |t_ij|`` with elimination rule
 #: ``arg max_i sup_j t_ij``; ``"max"`` — ``T_max = max_i t_i.`` with
-#: elimination rule ``arg max_i t_i.`` (Hansen, Lunde & Nason 2011, §3.1.2).
-MCSStatistic = Literal["range", "max"]
+#: elimination rule ``arg max_i t_i.`` (Hansen, Lunde & Nason 2011, §3.1.2);
+#: ``"semi_quadratic"`` — ``T_SQ = sum_{i<j} t_ij^2`` (Hansen, Lunde & Nason
+#: 2003; Hansen & Lunde 2005), a function of the same ``t_ij`` as the range
+#: statistic and paired here with the same elimination rule
+#: ``arg max_i sup_j t_ij``, so the two differ only in how the evidence across
+#: pairs is pooled: the largest pair, or all of them squared.
+MCSStatistic = Literal["range", "max", "semi_quadratic"]
 #: Which result rows :func:`loss_matrix` treats as missing. ``"flagged"``:
 #: any row carrying a ``missing_reason`` (the policy in the Phase 2 brief —
 #: one set of origins for every score of a model set). ``"score"``: only rows
@@ -206,6 +236,241 @@ def _resolve_losses(
 
 
 # --------------------------------------------------------------------------
+# long-run variance: pre-whitened Bartlett HAC with a data-driven bandwidth
+# --------------------------------------------------------------------------
+
+#: Andrews & Monahan (1992, §3): the pre-whitening AR coefficient is held
+#: below one in absolute value so that the recolouring factor ``1/(1-rho)^2``
+#: stays finite; their eigenvalue adjustment reduces to this cap for a scalar.
+MAX_PREWHITEN_RHO: Final = 0.97
+
+#: Andrews (1991, eq. 6.2 and Table I): the Bartlett kernel's bandwidth is
+#: ``1.1447 (alpha(1) T)^{1/3}``.
+_BARTLETT_CONSTANT: Final = 1.1447
+_BARTLETT_RATE: Final = 1.0 / 3.0
+#: The AR(1) plug-in's coefficient is kept strictly inside the unit circle so
+#: ``alpha(1)`` stays finite; an OLS slope at or beyond it means the series is
+#: not stationary enough for the plug-in to mean anything, and the bandwidth
+#: is then the largest one the formula can produce rather than infinity.
+_PLUGIN_RHO_CAP: Final = 0.999
+
+#: ``"andrews"``: the AR(1) plug-in of Andrews (1991). ``"rule_of_thumb"``:
+#: the deterministic, ``n``-only ``floor(4 (n/100)^{2/9})`` truncation lag that
+#: follows Newey & West (1994) and is most software's default, as a Bartlett
+#: bandwidth ``L + 1``. A number is a Bartlett bandwidth ``S`` in the same
+#: convention: lag ``j`` gets weight ``1 - j/S`` for ``0 < j < S``, so an
+#: integer Newey-West truncation lag ``L`` with weights ``1 - j/(L+1)`` is
+#: ``S = L + 1``.
+BandwidthRule = Literal["andrews", "rule_of_thumb"]
+
+
+@dataclass(frozen=True)
+class HACSpec:
+    """How the long-run variance of a loss differential is estimated.
+
+    ``bandwidth`` is :data:`BandwidthRule` or a fixed Bartlett bandwidth;
+    ``scale`` multiplies whichever results, which is how a sensitivity ladder
+    (half, once, twice the automatic value) is expressed without re-deriving
+    the rule. ``prewhiten`` applies Andrews & Monahan's (1992) AR(1)
+    pre-whitening: the kernel sees the AR(1) residuals of the demeaned
+    series and the result is recoloured by ``1/(1-rho)^2``; ``max_rho`` caps
+    the coefficient. When pre-whitening, the automatic bandwidth is computed
+    on the residuals, as Andrews & Monahan do.
+    """
+
+    bandwidth: float | BandwidthRule = "andrews"
+    prewhiten: bool = True
+    scale: float = 1.0
+    max_rho: float = MAX_PREWHITEN_RHO
+
+    def __post_init__(self) -> None:
+        if isinstance(self.bandwidth, str):
+            if self.bandwidth not in ("andrews", "rule_of_thumb"):
+                raise ValueError(f"unknown bandwidth rule {self.bandwidth!r}")
+        elif not (math.isfinite(self.bandwidth) and self.bandwidth > 0.0):
+            raise ValueError(f"a fixed bandwidth must be finite and positive, got {self.bandwidth}")
+        if not (math.isfinite(self.scale) and self.scale > 0.0):
+            raise ValueError(f"scale must be finite and positive, got {self.scale}")
+        if not 0.0 < self.max_rho < 1.0:
+            raise ValueError(f"max_rho must lie strictly inside (0, 1), got {self.max_rho}")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "bandwidth": self.bandwidth,
+            "prewhiten": bool(self.prewhiten),
+            "scale": float(self.scale),
+            "max_rho": float(self.max_rho),
+        }
+
+
+@dataclass(frozen=True)
+class LongRunVariance:
+    """One long-run variance estimate and everything that went into it.
+
+    ``omega`` estimates ``sum_k gamma_k`` of the series itself (recoloured
+    when pre-whitened); ``bandwidth`` is the Bartlett bandwidth applied to
+    the series the kernel actually saw and ``n_lags`` how many autocovariances
+    received positive weight. ``rho`` is the pre-whitening coefficient (0 when
+    not pre-whitening) and ``rho_capped`` whether :attr:`HACSpec.max_rho`
+    bound it. ``rho1`` is the first-order sample autocorrelation of the
+    series, reported so a reader can see how much the correction is doing.
+    """
+
+    omega: float
+    bandwidth: float
+    n_lags: int
+    prewhiten: bool
+    rho: float
+    rho_capped: bool
+    rho1: float
+    n: int
+
+
+def ar1_coefficient(values: object) -> float:
+    """OLS slope of ``x_t`` on ``x_{t-1}`` after demeaning by the full-sample mean.
+
+    ``0.0`` for a series too short or too flat to regress.
+    """
+    x = _as_1d(values, "values")
+    if x.size < 3:
+        return 0.0
+    centred = x - x.mean()
+    denominator = float(centred[:-1] @ centred[:-1])
+    if not denominator > 0.0:
+        return 0.0
+    return float(centred[1:] @ centred[:-1]) / denominator
+
+
+def autocorrelation(values: object, lag: int = 1) -> float:
+    """Sample autocorrelation ``gamma_hat_lag / gamma_hat_0``; NaN for a constant series."""
+    x = _as_1d(values, "values")
+    if lag < 1:
+        raise ValueError(f"lag must be >= 1, got {lag}")
+    if x.size <= lag:
+        return math.nan
+    centred = x - x.mean()
+    gamma0 = float(centred @ centred)
+    if not gamma0 > 0.0:
+        return math.nan
+    return float(centred[lag:] @ centred[:-lag]) / gamma0
+
+
+def effective_sample_size(n: int, rho1: float) -> float:
+    """``n (1 - rho) / (1 + rho)``: the AR(1)-equivalent number of independent observations.
+
+    The variance of the mean of an AR(1) at ``rho`` is ``sigma^2/n``
+    times ``(1 + rho)/(1 - rho)`` to first order, so this is the ``n`` an iid
+    sample would need to say as much about the mean. NaN when ``rho1`` is.
+    """
+    if not math.isfinite(rho1) or rho1 >= 1.0 or rho1 <= -1.0:
+        return math.nan
+    return n * (1.0 - rho1) / (1.0 + rho1)
+
+
+def andrews_bandwidth(values: object) -> float:
+    """Andrews (1991) AR(1) plug-in bandwidth for the Bartlett kernel.
+
+    ``1.1447 (alpha(1) n)^{1/3}`` with ``alpha(1) = 4 rho^2 / ((1-rho)^2 (1+rho)^2)``
+    (eq. 6.4 for a scalar AR(1) with unit weight), ``rho`` the OLS AR(1)
+    coefficient of the series. ``0.0`` — no lag weighted — when the series is
+    uncorrelated at lag one.
+    """
+    x = _as_1d(values, "values")
+    rho = ar1_coefficient(x)
+    rho = max(-_PLUGIN_RHO_CAP, min(_PLUGIN_RHO_CAP, rho))
+    alpha1 = 4.0 * rho * rho / ((1.0 - rho) ** 2 * (1.0 + rho) ** 2)
+    return float(_BARTLETT_CONSTANT * (alpha1 * x.size) ** _BARTLETT_RATE)
+
+
+def rule_of_thumb_bandwidth(n: int) -> float:
+    """``floor(4 (n/100)^{2/9}) + 1``: the fixed-rule truncation lag as a Bartlett bandwidth.
+
+    The same rule as ``volbench.analysis.hac_bandwidth`` (whose ``L`` gives
+    weights ``1 - j/(L+1)``), so a long-run variance at this bandwidth without
+    pre-whitening is that module's estimator exactly. Stated for what it is:
+    a function of ``n`` alone, blind to how persistent the series is.
+    """
+    if n < 2:
+        return 1.0
+    return float(int(4.0 * (n / 100.0) ** (2.0 / 9.0) // 1.0) + 1)
+
+
+def _bartlett_long_run(centred: NDArray[np.float64], bandwidth: float) -> tuple[float, int]:
+    """``gamma_0 + 2 sum_{0<j<S} (1 - j/S) gamma_j`` with ``1/n``-normalised autocovariances."""
+    n = centred.size
+    omega = float(centred @ centred) / n
+    n_lags = 0
+    j = 1
+    while j < bandwidth and j < n:
+        # Same operation order as ``analysis.hac_mean_se``, so that a fixed
+        # bandwidth of ``L + 1`` reproduces that estimator to the bit.
+        gamma_j = float(centred[j:] @ centred[:-j]) / n
+        omega += 2.0 * (1.0 - j / bandwidth) * gamma_j
+        n_lags += 1
+        j += 1
+    return omega, n_lags
+
+
+def long_run_variance(values: object, spec: HACSpec | None = None) -> LongRunVariance:
+    """Long-run variance of a series, Bartlett kernel, optionally pre-whitened.
+
+    Without pre-whitening this is the Newey-West estimator on the demeaned
+    series at ``spec.bandwidth``. With it (the default), Andrews & Monahan
+    (1992): fit ``x_t - x̄ = rho (x_{t-1} - x̄) + e_t`` by OLS, cap ``rho`` at
+    ``spec.max_rho``, apply the kernel to the demeaned residuals at a bandwidth
+    chosen *on the residuals*, and recolour: ``omega = omega_e / (1 - rho)^2``.
+    A fixed rule-of-thumb bandwidth on a persistent series understates the
+    long-run variance by whatever the kernel cannot see past its window; the
+    AR(1) fit carries that dependence instead, and the residuals are close
+    enough to white for a short window to be right.
+
+    Non-finite values are not accepted: the caller decides what a hole means.
+    """
+    spec = HACSpec() if spec is None else spec
+    x = _as_1d(values, "values")
+    if x.size < 2:
+        raise ValueError(f"need at least two observations, got {x.size}")
+    if not np.all(np.isfinite(x)):
+        raise ValueError("long_run_variance needs a finite series; drop or mask holes first")
+    centred = x - x.mean()
+    rho1 = autocorrelation(x, 1)
+
+    rho = 0.0
+    capped = False
+    series = centred
+    if spec.prewhiten:
+        if x.size < 3:
+            raise ValueError("pre-whitening needs at least three observations")
+        rho = ar1_coefficient(x)
+        if abs(rho) > spec.max_rho:
+            rho = math.copysign(spec.max_rho, rho)
+            capped = True
+        residuals = centred[1:] - rho * centred[:-1]
+        series = residuals - residuals.mean()
+
+    if spec.bandwidth == "andrews":
+        base = andrews_bandwidth(series)
+    elif spec.bandwidth == "rule_of_thumb":
+        base = rule_of_thumb_bandwidth(series.size)
+    else:
+        base = float(spec.bandwidth)
+    bandwidth = base * spec.scale
+    omega, n_lags = _bartlett_long_run(series, bandwidth)
+    if spec.prewhiten:
+        omega /= (1.0 - rho) ** 2
+    return LongRunVariance(
+        omega=float(omega),
+        bandwidth=float(bandwidth),
+        n_lags=int(n_lags),
+        prewhiten=bool(spec.prewhiten),
+        rho=float(rho),
+        rho_capped=bool(capped),
+        rho1=float(rho1),
+        n=int(x.size),
+    )
+
+
+# --------------------------------------------------------------------------
 # Diebold-Mariano with the Harvey-Leybourne-Newbold correction
 # --------------------------------------------------------------------------
 
@@ -222,6 +487,14 @@ class DMResult:
     and automatically reject") was applied. ``n`` is the number of complete
     pairs used, ``n_dropped`` how many origins were excluded for a missing
     loss on either side.
+
+    ``hln_factor`` is the correction factor actually applied (1 when ``hln``
+    is off). Under a kernel estimator (``hac`` given) ``bandwidth`` is the
+    Bartlett bandwidth used, ``lag`` the number of autocovariances it gave
+    positive weight, ``prewhiten``/``rho``/``rho_capped`` the Andrews-Monahan
+    step; under the windowed estimator ``bandwidth`` is NaN. ``rho1`` is the
+    first-order autocorrelation of the differential and ``n_eff`` its
+    AR(1)-equivalent sample size, both reported whichever estimator ran.
     """
 
     statistic: float
@@ -237,6 +510,13 @@ class DMResult:
     alternative: Alternative
     variance_nonpositive: bool
     config_hash: str
+    hln_factor: float
+    bandwidth: float
+    prewhiten: bool
+    rho: float
+    rho_capped: bool
+    rho1: float
+    n_eff: float
 
 
 def _autocovariances(d: NDArray[np.float64], max_lag: int) -> NDArray[np.float64]:
@@ -271,6 +551,7 @@ def diebold_mariano(
     kernel: Kernel = "rectangular",
     hln: bool = True,
     alternative: Alternative = "two-sided",
+    hac: HACSpec | None = None,
 ) -> DMResult:
     """Diebold-Mariano test of equal expected loss, HLN-corrected by default.
 
@@ -324,6 +605,17 @@ def diebold_mariano(
         ``False`` gives the original asymptotic test.
     alternative:
         See :data:`Alternative`.
+    hac:
+        Replace the ``h - 1`` window with a kernel estimator of the long-run
+        variance (:func:`long_run_variance`): Bartlett kernel, a data-driven
+        or fixed bandwidth, and Andrews-Monahan pre-whitening by default. The
+        windowed estimator at ``h = 1`` uses *no* autocovariance at all, which
+        is only right when the differential is white; a persistent
+        differential — volatility losses cluster — then gets a denominator
+        that is too small and a p-value that is too small with it. ``lag``
+        and ``hac`` are alternatives, not combinable. The HLN factor is then
+        computed with the forecast ``horizon``: the bandwidth is not a count
+        of autocovariances the differential is assumed to carry.
 
     Notes
     -----
@@ -337,6 +629,8 @@ def diebold_mariano(
         raise ValueError(f"loss_a has length {a.size} but loss_b has length {b.size}")
     if horizon < 1:
         raise ValueError(f"horizon must be >= 1, got {horizon}")
+    if hac is not None and lag is not None:
+        raise ValueError("pass either lag (the truncated window) or hac (the kernel), not both")
     if lag is None:
         lag = horizon - 1
     if lag < 0:
@@ -350,19 +644,31 @@ def diebold_mariano(
     n_dropped = int(a.size - int(valid.sum()))
     d = a[valid] - b[valid]
     n = int(d.size)
-    h = lag + 1
+    # What the HLN factor sees: under the windowed estimator the truncation
+    # lag plus one, so the estimator and its bias correction stay consistent;
+    # under a kernel estimator the forecast horizon itself.
+    h = horizon if hac is not None else lag + 1
     if n <= h or n < 2:
         raise ValueError(
             f"need more than lag + 1 = {h} complete loss pairs (and at least 2) to estimate "
             f"{lag} autocovariances; got {n} after dropping {n_dropped}"
         )
 
-    gamma = _autocovariances(d, lag)
-    if kernel == "rectangular":
-        weights = np.ones(lag, dtype=np.float64)
+    lrv: LongRunVariance | None = None
+    if hac is not None:
+        if n < 3:
+            raise ValueError(f"the kernel estimator needs at least three complete pairs, got {n}")
+        lrv = long_run_variance(d, hac)
+        variance = lrv.omega / n
+        kernel = "bartlett"
+        lag = lrv.n_lags
     else:
-        weights = 1.0 - np.arange(1, lag + 1, dtype=np.float64) / h
-    variance = float(gamma[0] + 2.0 * float(np.dot(weights, gamma[1:]))) / n
+        gamma = _autocovariances(d, lag)
+        if kernel == "rectangular":
+            weights = np.ones(lag, dtype=np.float64)
+        else:
+            weights = 1.0 - np.arange(1, lag + 1, dtype=np.float64) / h
+        variance = float(gamma[0] + 2.0 * float(np.dot(weights, gamma[1:]))) / n
     mean_diff = float(d.mean())
     factor = math.sqrt((n + 1 - 2 * h + h * (h - 1) / n) / n) if hln else 1.0
 
@@ -388,6 +694,7 @@ def diebold_mariano(
             stacklevel=2,
         )
     p_value = _dm_p_value(statistic, alternative, n - 1 if hln else None)
+    rho1 = lrv.rho1 if lrv is not None else autocorrelation(d, 1)
 
     digest = config_hash(
         {
@@ -399,6 +706,7 @@ def diebold_mariano(
             "kernel": kernel,
             "hln": bool(hln),
             "alternative": alternative,
+            "hac": None if hac is None else hac.as_dict(),
             "package_version": package_version(),
         }
     )
@@ -416,6 +724,13 @@ def diebold_mariano(
         alternative=alternative,
         variance_nonpositive=variance_nonpositive,
         config_hash=digest,
+        hln_factor=float(factor),
+        bandwidth=lrv.bandwidth if lrv is not None else math.nan,
+        prewhiten=lrv.prewhiten if lrv is not None else False,
+        rho=lrv.rho if lrv is not None else 0.0,
+        rho_capped=lrv.rho_capped if lrv is not None else False,
+        rho1=float(rho1),
+        n_eff=effective_sample_size(n, float(rho1)),
     )
 
 
@@ -431,6 +746,11 @@ class DMMatrix:
 
     These p-values are **not** multiplicity-corrected. The MCS is the
     primary "who wins" tool; see :func:`compare_models`.
+
+    ``bandwidth``, ``rho1`` and ``n_eff`` carry each pair's Bartlett bandwidth
+    (NaN under the windowed estimator), the first-order autocorrelation of its
+    differential, and the AR(1)-equivalent sample size; ``hac`` is the
+    estimator specification the matrix was built with, or ``None``.
     """
 
     models: tuple[str, ...]
@@ -443,6 +763,10 @@ class DMMatrix:
     lag: int
     kernel: Kernel
     hln: bool
+    bandwidth: pd.DataFrame
+    rho1: pd.DataFrame
+    n_eff: pd.DataFrame
+    hac: HACSpec | None
 
 
 def dm_matrix(
@@ -453,12 +777,15 @@ def dm_matrix(
     kernel: Kernel = "rectangular",
     hln: bool = True,
     model_names: Sequence[str] | None = None,
+    hac: HACSpec | None = None,
 ) -> DMMatrix:
     """Pairwise :func:`diebold_mariano` (two-sided) over every ordered pair.
 
     Each pair is evaluated on its own complete origins (pairwise-complete),
     so ``n`` can differ across entries; the ``n_dropped`` frame says by how
     much. See :class:`DMMatrix` for orientation and the multiplicity caveat.
+    ``hac`` is passed through to every pair; the bandwidth it chooses is then
+    a property of each pair's differential and is reported per entry.
     """
     matrix, names = _resolve_losses(losses, model_names)
     m = len(names)
@@ -466,6 +793,9 @@ def dm_matrix(
     p_value = np.full((m, m), math.nan)
     n_used = np.zeros((m, m), dtype=np.int64)
     n_dropped = np.zeros((m, m), dtype=np.int64)
+    bandwidth = np.full((m, m), math.nan)
+    rho1 = np.full((m, m), math.nan)
+    n_eff = np.full((m, m), math.nan)
     pairs: dict[tuple[str, str], DMResult] = {}
     for i in range(m):
         for j in range(m):
@@ -479,12 +809,16 @@ def dm_matrix(
                 kernel=kernel,
                 hln=hln,
                 alternative="two-sided",
+                hac=hac,
             )
             pairs[(names[i], names[j])] = result
             statistic[i, j] = result.statistic
             p_value[i, j] = result.p_value
             n_used[i, j] = result.n
             n_dropped[i, j] = result.n_dropped
+            bandwidth[i, j] = result.bandwidth
+            rho1[i, j] = result.rho1
+            n_eff[i, j] = result.n_eff
     index = pd.Index(names, name="model")
     resolved_lag = horizon - 1 if lag is None else lag
     return DMMatrix(
@@ -496,8 +830,12 @@ def dm_matrix(
         pairs=pairs,
         horizon=int(horizon),
         lag=int(resolved_lag),
-        kernel=kernel,
+        kernel="bartlett" if hac is not None else kernel,
         hln=bool(hln),
+        bandwidth=pd.DataFrame(bandwidth, index=index, columns=index),
+        rho1=pd.DataFrame(rho1, index=index, columns=index),
+        n_eff=pd.DataFrame(n_eff, index=index, columns=index),
+        hac=hac,
     )
 
 
@@ -594,6 +932,27 @@ def _bootstrap_column_means(
     return out
 
 
+def bootstrap_column_means(
+    values: object, block_length: int, n_boot: int, seed: int
+) -> NDArray[np.float64]:
+    """Column means of an ``n x m`` array under each moving-block resample, ``n_boot x m``.
+
+    The same draws as :func:`moving_block_indices` for the same
+    ``(n, block_length, n_boot, seed)`` — pinned in the tests — computed from
+    block sums so the ``n_boot x n`` index matrix is never materialised. This
+    is what :func:`model_confidence_set` consumes, exposed so that another
+    statistic (a Sharpe ratio, say) can be bootstrapped under exactly the
+    same scheme and seed and reported alongside it.
+    """
+    matrix = np.asarray(values, dtype=np.float64)
+    if matrix.ndim != 2:
+        raise ValueError(f"values must be 2-D (observations x columns), got {matrix.shape}")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("values must be finite; drop incomplete rows first")
+    _validate_bootstrap(matrix.shape[0], block_length, n_boot)
+    return _bootstrap_column_means(matrix, block_length, n_boot, np.random.default_rng(seed))
+
+
 # --------------------------------------------------------------------------
 # block length
 # --------------------------------------------------------------------------
@@ -645,6 +1004,41 @@ def _ppw_block_length(x: NDArray[np.float64]) -> float:
         return 1.0
     b_cb = (2.0 * g * g / d_cb) ** (1.0 / 3.0) * n ** (1.0 / 3.0)
     return min(b_cb, b_max) if math.isfinite(b_cb) else 1.0
+
+
+def politis_white_block_length(values: object) -> float:
+    """The Politis-White automatic block length of one series, unrounded.
+
+    :func:`default_block_length` takes the largest of these over the pairwise
+    loss differentials; this is the per-series value it is built from, so a
+    chosen block length can be read against each series it was chosen for.
+    """
+    x = _as_1d(values, "values")
+    if x.size < 3 or not np.all(np.isfinite(x)):
+        raise ValueError("need at least three finite observations")
+    return _ppw_block_length(x)
+
+
+def ar1_block_length(rho: float, n: int) -> float:
+    """The block length the Politis-White rule would return for an AR(1) at ``rho``.
+
+    With ``gamma_k = sigma^2 rho^|k|`` the rule's ``G = 2 sigma^2 rho /
+    (1-rho)^2`` and ``D_CB = (4/3) sigma^4 ((1+rho)/(1-rho))^2``, so
+    ``b = (6 rho^2 / ((1-rho)^2 (1+rho)^2))^{1/3} n^{1/3}``, capped where the
+    rule caps (``ceil(min(3 sqrt n, n/3))``). A yardstick for a chosen block
+    length: a series whose first-order autocorrelation is ``rho`` and whose
+    chosen block is far below this has a rule that stopped short, not a
+    series that is short-memory.
+    """
+    if not (-1.0 < rho < 1.0):
+        raise ValueError(f"rho must lie strictly inside (-1, 1), got {rho}")
+    if n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
+    if rho == 0.0:
+        return 1.0
+    b_max = float(math.ceil(min(3.0 * math.sqrt(n), n / 3.0)))
+    b = float((6.0 * rho * rho / ((1.0 - rho) ** 2 * (1.0 + rho) ** 2)) ** (1.0 / 3.0))
+    return max(1.0, min(b * float(n ** (1.0 / 3.0)), b_max))
 
 
 def default_block_length(
@@ -753,6 +1147,27 @@ def _range_bootstrap(centred: NDArray[np.float64], sd: NDArray[np.float64]) -> N
     return out
 
 
+def _semi_quadratic_bootstrap(
+    centred: NDArray[np.float64], sd: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """``T*_{b,SQ} = sum_{i<j} ((c_{b,i} - c_{b,j}) / sd_ij)^2`` for every resample ``b``.
+
+    The sum over ordered pairs counts every unordered pair twice and the
+    diagonal not at all, hence the half.
+    """
+    n_boot, m = centred.shape
+    out = np.empty(n_boot, dtype=np.float64)
+    positive = sd > 0.0
+    for lo in range(0, n_boot, _BOOT_CHUNK):
+        hi = min(lo + _BOOT_CHUNK, n_boot)
+        chunk = centred[lo:hi]
+        diff = chunk[:, :, None] - chunk[:, None, :]
+        ratio = np.zeros_like(diff)
+        np.divide(diff, sd[None, :, :], out=ratio, where=positive[None, :, :])
+        out[lo:hi] = 0.5 * (ratio * ratio).reshape(hi - lo, m * m).sum(axis=1)
+    return out
+
+
 def model_confidence_set(
     losses: LossMatrix | pd.DataFrame | NDArray[np.float64],
     *,
@@ -822,18 +1237,22 @@ def model_confidence_set(
         differentials, floored at ``max(1, horizon)``). Recorded on the
         result either way, so a reported MCS always states its block length.
     statistic:
-        ``"range"`` (default) or ``"max"``, see above. The range statistic
-        is the one HLN's corrigendum recommends (their published results had
-        inadvertently used a minimum t-statistic); it is also the default
-        of the reference ``arch`` implementation.
+        ``"range"`` (default), ``"max"`` or ``"semi_quadratic"``, see above
+        and :data:`MCSStatistic`. The range statistic is the one HLN's
+        corrigendum recommends (their published results had inadvertently
+        used a minimum t-statistic); it is also the default of the reference
+        ``arch`` implementation. The semi-quadratic statistic ``T_SQ =
+        sum_{i<j} t_ij^2`` (HLN 2003; Hansen & Lunde 2005) pools every pair
+        rather than taking the largest, and shares the range statistic's
+        elimination rule.
     horizon:
         Forecast horizon of the losses; only used to floor the default block
         length.
     """
     if not 0.0 < alpha < 1.0:
         raise ValueError(f"alpha must lie strictly inside (0, 1), got {alpha}")
-    if statistic not in ("range", "max"):
-        raise ValueError(f"statistic must be 'range' or 'max', got {statistic!r}")
+    if statistic not in ("range", "max", "semi_quadratic"):
+        raise ValueError(f"statistic must be 'range', 'max' or 'semi_quadratic', got {statistic!r}")
     if horizon < 1:
         raise ValueError(f"horizon must be >= 1, got {horizon}")
     matrix, names = _resolve_losses(losses, model_names)
@@ -868,12 +1287,16 @@ def model_confidence_set(
     step_p: list[float] = []
     while len(remaining) > 1:
         idx = np.array(remaining, dtype=np.int64)
-        if statistic == "range":
+        if statistic in ("range", "semi_quadratic"):
             d_bar = mean_loss[idx][:, None] - mean_loss[idx][None, :]
             sd = pair_sd[np.ix_(idx, idx)]
             t_stat = _safe_ratio(d_bar, sd)
-            observed = float(np.abs(t_stat).max())
-            boot = _range_bootstrap(centred[:, idx], sd)
+            if statistic == "range":
+                observed = float(np.abs(t_stat).max())
+                boot = _range_bootstrap(centred[:, idx], sd)
+            else:
+                observed = 0.5 * float((t_stat * t_stat).sum())
+                boot = _semi_quadratic_bootstrap(centred[:, idx], sd)
             worst = int(idx[int(np.argmax(t_stat.max(axis=1)))])
         else:
             sub = centred[:, idx]
