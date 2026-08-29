@@ -1,0 +1,144 @@
+asset,model,signal,k,n,rate
+BTC-USD,autoarima,optimizer status != 0 (J1 re-fit probe),133,133,133/133 = 100.00%
+BTC-USD,autoets,not instrumented,,,not instrumented
+BTC-USD,chronos,not instrumented,,,not instrumented
+BTC-USD,ewma,not instrumented,,,not instrumented
+BTC-USD,garch11,"ewma fallback (store, fit_status)",0,133,0/133 = 0.00%
+BTC-USD,garch11_t,"ewma fallback (store, fit_status)",15,133,15/133 = 11.28%
+BTC-USD,gjr,"ewma fallback (store, fit_status)",0,133,0/133 = 0.00%
+BTC-USD,har,not instrumented,,,not instrumented
+BTC-USD,lgbm,not instrumented,,,not instrumented
+BTC-USD,moirai,not instrumented,,,not instrumented
+BTC-USD,naive,not instrumented,,,not instrumented
+BTC-USD,patchtst,not instrumented,,,not instrumented
+BTC-USD,timesfm,not instrumented,,,not instrumented
+CAC,autoarima,optimizer status != 0 (J1 re-fit probe),235,240,235/240 = 97.92%
+CAC,autoets,not instrumented,,,not instrumented
+CAC,chronos,not instrumented,,,not instrumented
+CAC,ewma,not instrumented,,,not instrumented
+CAC,garch11,"ewma fallback (store, fit_status)",0,240,0/240 = 0.00%
+CAC,garch11_t,"ewma fallback (store, fit_status)",0,240,0/240 = 0.00%
+CAC,gjr,"ewma fallback (store, fit_status)",0,240,0/240 = 0.00%
+CAC,har,not instrumented,,,not instrumented
+CAC,lgbm,not instrumented,,,not instrumented
+CAC,moirai,not instrumented,,,not instrumented
+CAC,naive,not instrumented,,,not instrumented
+CAC,patchtst,not instrumented,,,not instrumented
+CAC,timesfm,not instrumented,,,not instrumented
+DAX,autoarima,optimizer status != 0 (J1 re-fit probe),236,238,236/238 = 99.16%
+DAX,autoets,not instrumented,,,not instrumented
+DAX,chronos,not instrumented,,,not instrumented
+DAX,ewma,not instrumented,,,not instrumented
+DAX,garch11,"ewma fallback (store, fit_status)",0,238,0/238 = 0.00%
+DAX,garch11_t,"ewma fallback (store, fit_status)",0,238,0/238 = 0.00%
+DAX,gjr,"ewma fallback (store, fit_status)",0,238,0/238 = 0.00%
+DAX,har,not instrumented,,,not instrumented
+DAX,lgbm,not instrumented,,,not instrumented
+DAX,moirai,not instrumented,,,not instrumented
+DAX,naive,not instrumented,,,not instrumented
+DAX,patchtst,not instrumented,,,not instrumented
+DAX,timesfm,not instrumented,,,not instrumented
+DIA,autoarima,optimizer status != 0 (J1 re-fit probe),228,234,228/234 = 97.44%
+DIA,autoets,not instrumented,,,not instrumented
+DIA,chronos,not instrumented,,,not instrumented
+DIA,ewma,not instrumented,,,not instrumented
+DIA,garch11,"ewma fallback (store, fit_status)",3,234,3/234 = 1.28%
+DIA,garch11_t,"ewma fallback (store, fit_status)",3,234,3/234 = 1.28%
+DIA,gjr,"ewma fallback (store, fit_status)",1,234,1/234 = 0.43%
+DIA,har,not instrumented,,,not instrumented
+DIA,lgbm,not instrumented,,,not instrumented
+DIA,moirai,not instrumented,,,not instrumented
+DIA,naive,not instrumented,,,not instrumented
+DIA,patchtst,not instrumented,,,not instrumented
+DIA,timesfm,not instrumented,,,not instrumented
+ETH-USD,autoarima,optimizer status != 0 (J1 re-fit probe),131,133,131/133 = 98.50%
+ETH-USD,autoets,not instrumented,,,not instrumented
+ETH-USD,chronos,not instrumented,,,not instrumented
+ETH-USD,ewma,not instrumented,,,not instrumented
+ETH-USD,garch11,"ewma fallback (store, fit_status)",0,133,0/133 = 0.00%
+ETH-USD,garch11_t,"ewma fallback (store, fit_status)",0,133,0/133 = 0.00%
+ETH-USD,gjr,"ewma fallback (store, fit_status)",1,133,1/133 = 0.75%
+ETH-USD,har,not instrumented,,,not instrumented
+ETH-USD,lgbm,not instrumented,,,not instrumented
+ETH-USD,moirai,not instrumented,,,not instrumented
+ETH-USD,naive,not instrumented,,,not instrumented
+ETH-USD,patchtst,not instrumented,,,not instrumented
+ETH-USD,timesfm,not instrumented,,,not instrumented
+HSI,autoarima,optimizer status != 0 (J1 re-fit probe),227,230,227/230 = 98.70%
+HSI,autoets,not instrumented,,,not instrumented
+HSI,chronos,not instrumented,,,not instrumented
+HSI,ewma,not instrumented,,,not instrumented
+HSI,garch11,"ewma fallback (store, fit_status)",0,230,0/230 = 0.00%
+HSI,garch11_t,"ewma fallback (store, fit_status)",0,230,0/230 = 0.00%
+HSI,gjr,"ewma fallback (store, fit_status)",14,230,14/230 = 6.09%
+HSI,har,not instrumented,,,not instrumented
+HSI,lgbm,not instrumented,,,not instrumented
+HSI,moirai,not instrumented,,,not instrumented
+HSI,naive,not instrumented,,,not instrumented
+HSI,patchtst,not instrumented,,,not instrumented
+HSI,timesfm,not instrumented,,,not instrumented
+KOSPI,autoarima,optimizer status != 0 (J1 re-fit probe),230,231,230/231 = 99.57%
+KOSPI,autoets,not instrumented,,,not instrumented
+KOSPI,chronos,not instrumented,,,not instrumented
+KOSPI,ewma,not instrumented,,,not instrumented
+KOSPI,garch11,"ewma fallback (store, fit_status)",0,231,0/231 = 0.00%
+KOSPI,garch11_t,"ewma fallback (store, fit_status)",0,231,0/231 = 0.00%
+KOSPI,gjr,"ewma fallback (store, fit_status)",0,231,0/231 = 0.00%
+KOSPI,har,not instrumented,,,not instrumented
+KOSPI,lgbm,not instrumented,,,not instrumented
+KOSPI,moirai,not instrumented,,,not instrumented
+KOSPI,naive,not instrumented,,,not instrumented
+KOSPI,patchtst,not instrumented,,,not instrumented
+KOSPI,timesfm,not instrumented,,,not instrumented
+NDX,autoarima,optimizer status != 0 (J1 re-fit probe),234,236,234/236 = 99.15%
+NDX,autoets,not instrumented,,,not instrumented
+NDX,chronos,not instrumented,,,not instrumented
+NDX,ewma,not instrumented,,,not instrumented
+NDX,garch11,"ewma fallback (store, fit_status)",0,236,0/236 = 0.00%
+NDX,garch11_t,"ewma fallback (store, fit_status)",0,236,0/236 = 0.00%
+NDX,gjr,"ewma fallback (store, fit_status)",0,236,0/236 = 0.00%
+NDX,har,not instrumented,,,not instrumented
+NDX,lgbm,not instrumented,,,not instrumented
+NDX,moirai,not instrumented,,,not instrumented
+NDX,naive,not instrumented,,,not instrumented
+NDX,patchtst,not instrumented,,,not instrumented
+NDX,timesfm,not instrumented,,,not instrumented
+NKX,autoarima,optimizer status != 0 (J1 re-fit probe),224,228,224/228 = 98.25%
+NKX,autoets,not instrumented,,,not instrumented
+NKX,chronos,not instrumented,,,not instrumented
+NKX,ewma,not instrumented,,,not instrumented
+NKX,garch11,"ewma fallback (store, fit_status)",0,229,0/229 = 0.00%
+NKX,garch11_t,"ewma fallback (store, fit_status)",0,229,0/229 = 0.00%
+NKX,gjr,"ewma fallback (store, fit_status)",0,229,0/229 = 0.00%
+NKX,har,not instrumented,,,not instrumented
+NKX,lgbm,not instrumented,,,not instrumented
+NKX,moirai,not instrumented,,,not instrumented
+NKX,naive,not instrumented,,,not instrumented
+NKX,patchtst,not instrumented,,,not instrumented
+NKX,timesfm,not instrumented,,,not instrumented
+SPY,autoarima,optimizer status != 0 (J1 re-fit probe),230,234,230/234 = 98.29%
+SPY,autoets,not instrumented,,,not instrumented
+SPY,chronos,not instrumented,,,not instrumented
+SPY,ewma,not instrumented,,,not instrumented
+SPY,garch11,"ewma fallback (store, fit_status)",1,234,1/234 = 0.43%
+SPY,garch11_t,"ewma fallback (store, fit_status)",0,234,0/234 = 0.00%
+SPY,gjr,"ewma fallback (store, fit_status)",0,234,0/234 = 0.00%
+SPY,har,not instrumented,,,not instrumented
+SPY,lgbm,not instrumented,,,not instrumented
+SPY,moirai,not instrumented,,,not instrumented
+SPY,naive,not instrumented,,,not instrumented
+SPY,patchtst,not instrumented,,,not instrumented
+SPY,timesfm,not instrumented,,,not instrumented
+TWSE,autoarima,optimizer status != 0 (J1 re-fit probe),226,229,226/229 = 98.69%
+TWSE,autoets,not instrumented,,,not instrumented
+TWSE,chronos,not instrumented,,,not instrumented
+TWSE,ewma,not instrumented,,,not instrumented
+TWSE,garch11,"ewma fallback (store, fit_status)",0,229,0/229 = 0.00%
+TWSE,garch11_t,"ewma fallback (store, fit_status)",0,229,0/229 = 0.00%
+TWSE,gjr,"ewma fallback (store, fit_status)",0,229,0/229 = 0.00%
+TWSE,har,not instrumented,,,not instrumented
+TWSE,lgbm,not instrumented,,,not instrumented
+TWSE,moirai,not instrumented,,,not instrumented
+TWSE,naive,not instrumented,,,not instrumented
+TWSE,patchtst,not instrumented,,,not instrumented
+TWSE,timesfm,not instrumented,,,not instrumented
