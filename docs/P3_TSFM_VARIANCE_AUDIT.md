@@ -4,6 +4,19 @@
 fragment. The primary store was opened read-only and the resumability check in
 §7 confirms it is unchanged. No recommendation to fix or disclose is made.
 
+**Which fragment set this was computed against — the *pre-fix* grid.** Every
+number below reads the 143 cells of run digest `cb28a214`, store digest
+`8f1f83db`, now archived at `docs/archive/P3_GRID_manifest.91ba622a8e50.json`.
+That matters because the fix this document motivated has since landed: L's
+lognormal tail closure moved the 33 TSFM cells, and
+docs/P3_MANIFEST_INVENTORY.md then promoted the post-fix manifest into
+`docs/P3_GRID_manifest.json`. `benchmarks.tsfm_distribution_probe` defaults
+`--manifest` to that path and always has, so **its default changed meaning
+without changing text**: re-running it today measures the post-fix cells, whose
+closure is the one this document argued for, and comparing that output against
+the numbers below would be comparing two different grids. To reproduce these,
+pass `--manifest docs/archive/P3_GRID_manifest.91ba622a8e50.json`.
+
 **Read `docs/P3_METRIC_TARGETS.md` first**, particularly §2: the quantile grid
 is over **realized variance**, not returns, and `patchtst` has no grid at all.
 Both change what "the defect" is.

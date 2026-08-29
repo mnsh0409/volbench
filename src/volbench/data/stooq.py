@@ -55,6 +55,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -93,7 +94,16 @@ STOOQ_INDEX_SYMBOLS: dict[str, str] = {
     "KOSPI": "^kospi",  # KOSPI Composite (South Korea) — confirmed
 }
 
-_REQUEST_HEADERS = {"User-Agent": "volbench-research/0.1 (+mailto:martin.ai.nlp@gmail.com)"}
+#: A contact address in a scraper's User-Agent is courtesy to the operator of
+#: the endpoint, and this one used to be hardcoded. It is read from the
+#: environment now: IJF review is double-blind, this file ships in the
+#: reproducibility package, and an email address in it identifies the author
+#: (``tests/test_identity_leakage.py``). Unset, the header still names the tool
+#: and its version, which is the part the endpoint actually needs.
+_CONTACT = os.environ.get("VOLBENCH_CONTACT", "").strip()
+_REQUEST_HEADERS = {
+    "User-Agent": "volbench-research/0.1" + (f" (+mailto:{_CONTACT})" if _CONTACT else "")
+}
 
 
 class StooqDownloadError(RuntimeError):

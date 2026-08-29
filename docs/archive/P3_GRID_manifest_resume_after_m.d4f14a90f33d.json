@@ -1,5 +1,5 @@
 {
-  "manifest_digest": "45f8f41470cc2245ce25c06af947724a72a9f11ef6c702357927d8169b356ef9",
+  "manifest_digest": "6a4fa62b417e53287f79de153fcf67313fed166d11e0438b9804867497536737",
   "store_digest": "05efdb459c9e95ce4adbd77c38446de58bab891072d6a2012e9cd96b8ada2a98",
   "supersedes": null,
   "n_cells": 143,
@@ -14,8 +14,7 @@
     "kernel_signature": "4c64e2eacc61926e",
     "interpreter": {
       "python": "3.11.5",
-      "implementation": "CPython",
-      "executable": "/home/martin/Documents/IJF/volbench/volbench/.venv/bin/python3"
+      "implementation": "CPython"
     },
     "cpu_count": 32,
     "env": {

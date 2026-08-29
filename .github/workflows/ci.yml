@@ -5,7 +5,14 @@ on:
     # feat/** is included on purpose: the Phase-2 streams found that a
     # branch's "CI green" gate was otherwise only ever replicated locally,
     # because this project merges feat/* branches without pull requests.
-    branches: [main, "feat/**", "m2/**"]
+    #
+    # fix/** for the same reason, and it was omitted only because no such
+    # branch existed when the list was written. Two have now shipped without
+    # CI ever running -- fix/p3-model-defects and fix/manifest-provenance --
+    # and in both cases the absence was noticed only by asking the Actions
+    # API for the branch's run count and getting 0. A gate nobody can see is
+    # not failing is not a gate.
+    branches: [main, "feat/**", "fix/**", "m2/**"]
   pull_request:
 
 jobs:

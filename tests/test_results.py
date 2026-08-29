@@ -194,7 +194,7 @@ def test_paths_are_rejected_because_they_differ_across_machines() -> None:
     """D-011 runs the same cells on the dev box and on the cluster; a config
     carrying an absolute path could never produce a matching hash there."""
     with pytest.raises(TypeError, match="paths must not appear"):
-        config_hash({"cache": Path("/home/martin/data")})
+        config_hash({"cache": Path("/srv/volbench/cache")})
 
 
 def test_unhashable_types_fail_loudly_rather_than_hashing_a_repr() -> None:

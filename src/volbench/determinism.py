@@ -35,7 +35,6 @@ from __future__ import annotations
 import hashlib
 import os
 import platform
-import sys
 from typing import Any, Final
 
 __all__ = [
@@ -209,14 +208,17 @@ def interpreter_info() -> dict[str, Any]:
     measured. It is recorded so a disagreement between two runs can be
     attributed rather than guessed at.
 
-    ``executable`` is a path and therefore says which *venv*, which is what a
-    reader on the same machine actually needs; it never reaches a config hash,
-    where :func:`volbench.results._canon` refuses paths outright.
+    ``sys.executable`` used to be recorded here as well, to say which *venv*.
+    It is not any more. It is an absolute path under a home directory, so it
+    names the person who ran the study, and IJF review is double-blind: the
+    reproducibility package is part of what a reviewer sees
+    (``tests/test_identity_leakage.py``). Nothing is lost that reproduces a
+    run — the *version* is what a reader needs, and the venv path is meaningful
+    only on the one machine that already has it.
     """
     return {
         "python": platform.python_version(),
         "implementation": platform.python_implementation(),
-        "executable": sys.executable,
     }
 
 

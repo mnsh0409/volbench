@@ -16,9 +16,18 @@ htmlcov/
 
 # Data & results (never commit data; adapters download with checksums)
 # Root-anchored: bare "data/" would also match src/volbench/data/ (source code).
+#
+# By LOCATION, never by file type. There used to be a blanket `*.parquet` here,
+# and it had the wrong shape: tests/test_licensing_guard.py is deliberately
+# built on location precisely so that no per-file judgement is ever needed, and
+# a type-based ignore reintroduces exactly that judgement — while silently
+# withholding evidence that belongs beside the document it supports
+# (docs/P3_CONVERGENCE_FITS.parquet). Everything a study writes goes under
+# /data/ or results/, so those two rules already cover every parquet that must
+# never be committed; a parquet anywhere else is now visible rather than hidden,
+# and whether it may be committed is decided by reading its columns.
 /data/
 results/
-*.parquet
 
 # OS / editor
 .DS_Store

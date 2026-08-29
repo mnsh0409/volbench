@@ -75,6 +75,7 @@ __all__ = [
     "ARCHIVE_DIR",
     "CURRENT_MANIFEST",
     "DEFAULT_STORE",
+    "IDENTIFYING_FIELDS",
     "PROVENANCE_FIELDS",
     "annotate",
     "archive",
@@ -84,6 +85,7 @@ __all__ = [
     "manifest_digest",
     "orphaned_manifests",
     "problems",
+    "redact",
     "store_digest",
     "supersede",
 ]
@@ -103,6 +105,19 @@ DEFAULT_STORE: Final = Path("data/grid_primary/store")
 #: The envelope: what the manifest says about itself rather than about the run.
 #: Excluded from :func:`manifest_digest`.
 PROVENANCE_FIELDS: Final = ("manifest_digest", "store_digest", "supersedes")
+
+#: Fields removed from a manifest before it is published, by path from the
+#: root. They identify the person who ran the study rather than the run: IJF
+#: review is double-blind and the reproducibility package is part of what a
+#: reviewer sees (``tests/test_identity_leakage.py``). ``interpreter.executable``
+#: was an absolute path under a home directory; the interpreter *version* stayed,
+#: because the version is what reproduces a run and the venv path is meaningful
+#: only on the machine that already has it.
+#:
+#: ``determinism.interpreter_info`` no longer produces it, so this is a
+#: migration for manifests written before that changed, not a filter new runs
+#: rely on.
+IDENTIFYING_FIELDS: Final = (("environment", "interpreter", "executable"),)
 
 
 def _canonical(payload: Any) -> bytes:
@@ -191,6 +206,29 @@ def archive(path: Path, archive_dir: Path = ARCHIVE_DIR) -> Path:
     if not destination.exists():
         shutil.copyfile(path, destination)
     return destination
+
+
+def redact(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """The manifest with :data:`IDENTIFYING_FIELDS` removed, deeply.
+
+    Changes ``manifest_digest``, deliberately and once: the digest is the run's
+    citable anchor, so a redacted manifest is a different — publishable —
+    statement about the same run, and every document citing the old digest has
+    to move with it. Applied to *every* copy of a manifest rather than only the
+    committed one, so the counterpart relation :func:`orphaned_manifests`
+    depends on keeps holding.
+    """
+    out = json.loads(json.dumps(manifest))  # a deep copy that cannot alias
+    for path in IDENTIFYING_FIELDS:
+        node = out
+        for key in path[:-1]:
+            if not isinstance(node, dict) or key not in node:
+                break
+            node = node[key]
+        else:
+            if isinstance(node, dict):
+                node.pop(path[-1], None)
+    return dict(out)
 
 
 def supersede(path: Path, archive_dir: Path = ARCHIVE_DIR) -> dict[str, Any] | None:
@@ -298,6 +336,14 @@ def main(argv: list[str] | None = None) -> int:
         help="recompute the committed manifest's own digests against the store",
     )
     parser.add_argument(
+        "--redact",
+        type=Path,
+        nargs="+",
+        default=None,
+        metavar="MANIFEST",
+        help="strip the identifying fields from these manifests in place, and stop",
+    )
+    parser.add_argument(
         "--archive",
         type=Path,
         nargs="+",
@@ -313,6 +359,23 @@ def main(argv: list[str] | None = None) -> int:
         help="archive the current manifest and install this one in its place",
     )
     args = parser.parse_args(argv)
+
+    if args.redact is not None:
+        for target in args.redact:
+            before = _load(target)
+            after = redact(before)
+            if after == before:
+                print(f"unchanged  {target}")
+                continue
+            if any(field in after for field in PROVENANCE_FIELDS):
+                # The envelope described the un-redacted file; recompute it
+                # rather than leave a digest that no longer verifies.
+                after = annotate(
+                    after, store_root=args.store, supersedes=after.get("supersedes")
+                )
+            target.write_text(json.dumps(after, indent=2) + "\n", encoding="utf-8")
+            print(f"redacted   {target}  -> manifest_digest {manifest_digest(after)}")
+        return 0
 
     if args.archive is not None:
         for source in args.archive:
@@ -332,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not args.check:
-        parser.error("nothing to do: pass --check, --promote or --archive")
+        parser.error("nothing to do: pass --check, --promote, --archive or --redact")
 
     found = problems(args.manifest, args.store)
     if found:

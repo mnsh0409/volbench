@@ -37,14 +37,15 @@ the run wrote the file, not when a copy of it was made.
 
 | # | path | file SHA-256 | run digest | store digest | cells | comp/cach/fail | written | what it is |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `docs/P3_GRID_manifest.json` **(current)** | `da67e410` | `26842732` | `05efdb45` | 143 | 44/99/0 | 2026-08-28 23:26 | **the current grid manifest**: the L fix run, promoted and annotated |
+| 1 | `docs/P3_GRID_manifest.json` **(current)** | `4e217db2` | `4559a703` | `05efdb45` | 143 | 44/99/0 | 2026-08-28 23:26 | **the current grid manifest**: the L fix run, promoted and annotated |
 | 2 | `docs/archive/P3_GRID_manifest.91ba622a8e50.json` | `91ba622a` | `cb28a214` | `8f1f83db` | 143 | 130/13/0 | 2026-08-26 16:00 | superseded: the pre-fix committed manifest, the primary run |
 | 3 | `docs/archive/manifest_preflight.03e0ecf845b9.json` | `03e0ecf8` | `a669e766` | `45ffdfa1` | 13 | 13/0/0 | 2026-08-26 14:21 | superseded: the 13-cell preflight run |
 | 4 | `docs/archive/manifest_resume_after_k.80fbdde748d6.json` | `80fbdde7` | `91925032` | `8f1f83db` | 143 | 0/143/0 | 2026-08-28 20:45 | resume-verification artifact (pre-fix grid) |
 | 5 | `docs/archive/manifest_resume_after_move.cf25799a885a.json` | `cf25799a` | `4ae045fb` | `8f1f83db` | 143 | 0/143/0 | 2026-08-28 12:57 | resume-verification artifact (pre-fix grid), the driver move |
-| 6 | `docs/archive/manifest_resume_after_fix.b1605a43ec03.json` | `b1605a43` | `79799965` | `05efdb45` | 143 | 0/143/0 | 2026-08-29 00:26 | resume-verification artifact (post-fix grid), L's own re-run |
-| 7 | `docs/archive/P3_GRID_manifest_resume_after_m.367b9dbd3ba4.json` | `367b9dbd` | `45f8f414` | `05efdb45` | 143 | 0/143/0 | 2026-08-29 13:15 | resume-verification artifact (post-fix grid), §5 below |
-| — | `data/grid_primary/manifest_fix.json` | `2691d4b9` | `26842732` | `05efdb45` | 143 | 44/99/0 | 2026-08-28 23:26 | the file row 1 was promoted from; same run digest, so row 1 accounts for it |
+| 6 | `docs/archive/manifest_resume_after_fix.4590cc1e836b.json` | `4590cc1e` | `751411d1` | `05efdb45` | 143 | 0/143/0 | 2026-08-29 00:26 | resume-verification artifact (post-fix grid), L's own re-run |
+| 7 | `docs/archive/P3_GRID_manifest_resume_after_m.d4f14a90f33d.json` | `d4f14a90` | `6a4fa62b` | `05efdb45` | 143 | 0/143/0 | 2026-08-29 13:15 | resume-verification artifact (post-fix grid), §5 below |
+| 8 | `docs/archive/P3_GRID_manifest_resume_after_n.e217cb473269.json` | `e217cb47` | `f5c1558d` | `05efdb45` | 143 | 0/143/0 | 2026-08-29 16:01 | resume-verification artifact, docs/P3_REPO_HYGIENE.md §5; the first written without the identifying field |
+| — | `data/grid_primary/manifest_fix.json` | `6ab20fc5` | `4559a703` | `05efdb45` | 143 | 44/99/0 | 2026-08-28 23:26 | the file row 1 was promoted from; same run digest, so row 1 accounts for it |
 | — | `data/grid_primary/manifest_primary.json` | `91ba622a` | `cb28a214` | `8f1f83db` | 143 | 130/13/0 | 2026-08-26 15:37 | byte-identical to row 2 |
 | — | `data/grid_primary/manifest_preflight.json` | `03e0ecf8` | `a669e766` | `45ffdfa1` | 13 | 13/0/0 | 2026-08-26 14:21 | byte-identical to row 3 |
 | — | `data/grid_primary/manifest_resume_after_{k,move,fix}.json` | — | — | — | 143 | 0/143/0 | — | byte-identical to rows 4–6 |
@@ -66,7 +67,7 @@ Binance data. They are listed because they exist, and left alone.
 ## 2. Which one is current, and how that was established
 
 **`data/grid_primary/manifest_fix.json` — promoted to
-`docs/P3_GRID_manifest.json`, run digest `26842732`, naming fragment set
+`docs/P3_GRID_manifest.json`, run digest `4559a703`, naming fragment set
 `05efdb45`.** Established by the following, not by which name sounds most
 recent.
 
@@ -135,7 +136,7 @@ Check a tree against its own manifest:
 
 ```json
 {
-  "manifest_digest": "26842732cb6e98fc1ee756e5533d7e19bbe17be88859d0bea5a2fd656caaeb2f",
+  "manifest_digest": "4559a7033bc52c741a56c58fbdad7d584db75e1f7018ee7dcdd6379b18d534e8",
   "store_digest": "05efdb459c9e95ce4adbd77c38446de58bab891072d6a2012e9cd96b8ada2a98",
   "supersedes": {
     "manifest_digest": "cb28a214676edbefacd461ff4086cd2ac69424d94399f93e57d3a16974026e5f",
@@ -169,10 +170,28 @@ config hashes, which are not the data. `tests/test_manifest_provenance.py::TestT
 enumerates the cell keys and asserts the float is `wall_clock_s`, so this stays
 true rather than having been true once.
 
-One wart, recorded not fixed: `environment.interpreter.executable` is an
-absolute path on the machine that ran the study
-(`/home/martin/…/.venv/bin/python`). It is what the run recorded, and rewriting
-it would move the manifest's content digest away from the run it describes.
+**One field was removed after the fact, and the digest moved with it.** The
+manifest as promoted also carried `environment.interpreter.executable`, an
+absolute path under a home directory — so it named the person who ran the
+study, and IJF review is double-blind. That was recorded here as a wart and
+left; `docs/P3_REPO_HYGIENE.md` §4 removed it instead, from every copy at once,
+and `determinism.interpreter_info` no longer produces it. The interpreter
+*version* stayed: the version is what reproduces a run, the venv path is
+meaningful only on the machine that already has it.
+
+The redaction changed this manifest's citable anchor, once and deliberately:
+
+| | before | after |
+|---|---|---|
+| `manifest_digest` | `26842732cb6e98fc…` | **`4559a7033bc52c74…`** |
+| `store_digest` | `05efdb459c9e95ce…` | unchanged — no fragment moved |
+
+Every citation of the old digest was updated in the same commit. The two
+archived manifests that carried the same field were redacted with it, and
+renamed, because their content-addressed filenames asserted a file digest that
+had stopped describing them: `manifest_resume_after_fix.b1605a43ec03.json` →
+`…4590cc1e836b.json`, and `P3_GRID_manifest_resume_after_m.367b9dbd3ba4.json` →
+`…d4f14a90f33d.json`.
 
 ## 4. The default is now correct
 
@@ -261,7 +280,7 @@ later, these are recorded, not fixed:
   `data/grid_primary/manifest_fix.json` — gitignored, so a clean checkout
   cannot run them even though the file they want is now committed a directory
   away. Repointing all three at `docs/P3_GRID_manifest.json` would change no
-  number: the two files have the same `manifest_digest` (`26842732`), so they
+  number: the two files have the same `manifest_digest` (`4559a703`), so they
   name the same 143 cells in the same order. `benchmarks.tsfm_distribution_probe`
   already defaults to `docs/P3_GRID_manifest.json`, which means its default
   silently changed meaning today, from the pre-fix grid to the post-fix one —

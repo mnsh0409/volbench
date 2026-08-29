@@ -394,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--store-root", type=Path, default=Path("data/grid_primary/store"))
     parser.add_argument(
-        "--manifest", type=Path, default=Path("data/grid_primary/manifest_fix.json")
+        "--manifest", type=Path, default=Path("docs/P3_GRID_manifest.json")
     )
     parser.add_argument("--out", type=Path, default=Path("docs/P3_CONVERGENCE_FITS.parquet"))
     parser.add_argument("--assets", nargs="*", default=None)
