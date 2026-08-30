@@ -1,0 +1,137 @@
+{
+  "manifest_digest": "7e5895b9d4a3859220a99e5c2e710b37da748f65dc2bfb43d78e11b9f7c806fc",
+  "store_digest": "ed3487f6b9affdfdc7b377c55ce45c55b13dbea0e3122ed9861433ae2c32a668",
+  "supersedes": null,
+  "n_cells": 5,
+  "n_computed": 5,
+  "n_cached": 0,
+  "n_failed": 0,
+  "n_fits": 234,
+  "n_fits_fallback": 1,
+  "environment": {
+    "blas_threads": 1,
+    "thread_pin_explicit": true,
+    "kernel_signature": "4c64e2eacc61926e",
+    "interpreter": {
+      "python": "3.11.5",
+      "implementation": "CPython"
+    },
+    "cpu_count": 32,
+    "env": {
+      "NPY_DISABLE_CPU_FEATURES": "X86_V4 AVX512_ICL AVX512_SPR",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "blas": {
+      "name": "scipy-openblas",
+      "version": "0.3.31.188.0",
+      "openblas configuration": "OpenBLAS 0.3.31.188.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY Haswell MAX_THREADS=64",
+      "detection method": "pkgconfig"
+    },
+    "observed_thread_pools": [
+      {
+        "internal_api": "openblas",
+        "prefix": "libscipy_openblas",
+        "version": "0.3.31.188.0",
+        "num_threads": 1,
+        "threading_layer": "pthreads",
+        "architecture": "Haswell"
+      },
+      {
+        "internal_api": "openblas",
+        "prefix": "libscipy_openblas",
+        "version": "0.3.30",
+        "num_threads": 1,
+        "threading_layer": "pthreads",
+        "architecture": "Haswell"
+      }
+    ]
+  },
+  "cells": [
+    {
+      "index": 0,
+      "asset": "SPY",
+      "model": "ewma",
+      "horizon": 1,
+      "arm": "target-parkinson",
+      "lane": "cpu",
+      "status": "computed",
+      "config_hash": "0dac9a01df13aa71f0192de269f35d04f39c0a048724c06dd54076c041e8ea3c",
+      "n_rows": 4904,
+      "n_missing": 0,
+      "n_fits": 0,
+      "n_fits_fallback": 0,
+      "n_fits_nonconverged": 0,
+      "wall_clock_s": 0.719467,
+      "error": null
+    },
+    {
+      "index": 1,
+      "asset": "SPY",
+      "model": "garch11",
+      "horizon": 1,
+      "arm": "target-parkinson",
+      "lane": "cpu",
+      "status": "computed",
+      "config_hash": "dab7e0915a3feac35c0cb1fb009c31d4cd1e95e648cc61bc75da324a88303fbd",
+      "n_rows": 4904,
+      "n_missing": 0,
+      "n_fits": 234,
+      "n_fits_fallback": 1,
+      "n_fits_nonconverged": 1,
+      "wall_clock_s": 5.227771,
+      "error": null
+    },
+    {
+      "index": 2,
+      "asset": "SPY",
+      "model": "har",
+      "horizon": 1,
+      "arm": "target-parkinson",
+      "lane": "cpu",
+      "status": "computed",
+      "config_hash": "5db940efe8fcb2d8a1de7fe133afc4dc61652bad58b581ef84ef86bc97da4abd",
+      "n_rows": 4904,
+      "n_missing": 0,
+      "n_fits": 0,
+      "n_fits_fallback": 0,
+      "n_fits_nonconverged": 0,
+      "wall_clock_s": 1.081344,
+      "error": null
+    },
+    {
+      "index": 3,
+      "asset": "SPY",
+      "model": "lgbm",
+      "horizon": 1,
+      "arm": "target-parkinson",
+      "lane": "cpu",
+      "status": "computed",
+      "config_hash": "22ee3348676cfeea85f23e98790bbb73572a5aa0cf9d1d3cbec61753853f8e4c",
+      "n_rows": 4904,
+      "n_missing": 0,
+      "n_fits": 0,
+      "n_fits_fallback": 0,
+      "n_fits_nonconverged": 0,
+      "wall_clock_s": 6.562496,
+      "error": null
+    },
+    {
+      "index": 4,
+      "asset": "SPY",
+      "model": "naive",
+      "horizon": 1,
+      "arm": "target-parkinson",
+      "lane": "cpu",
+      "status": "computed",
+      "config_hash": "38164f9c6681faf2ed576ae9b9b29a1d2f24c26c0bd59c10bdf2e0f6861c76d0",
+      "n_rows": 4904,
+      "n_missing": 0,
+      "n_fits": 0,
+      "n_fits_fallback": 0,
+      "n_fits_nonconverged": 0,
+      "wall_clock_s": 0.63662,
+      "error": null
+    }
+  ]
+}

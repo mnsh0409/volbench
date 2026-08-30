@@ -35,6 +35,31 @@ Scoring target is each asset's own primary (D-017: a property of the cell):
 states in terms why crypto is not scored on the range estimator: its
 "overnight" term is a one-minute gap on a 24/7 market.
 
+The ablation arms
+=================
+Three of those settings are flags, because three ablation arms vary them:
+``--window`` (D-019's 1000-observation robustness arm against the 500
+primary), ``--recondition`` (D-015's frozen-forecast control, D-011's
+efficiency reading) and ``--target`` (the labelled robustness proxies of
+D-017). Their defaults are exactly the headline protocol above, so a run
+with none of them is the run that produced ``docs/P3_GRID_manifest.json``.
+
+They are flags on *the arm and the cell*, not a second code path:
+``--window`` and ``--recondition`` are fields of :class:`ProtocolArm` and
+reach the hash through the splitter and through ``protocol``; ``--target``
+is the cell's scoring proxy and reaches it through ``proxy_name`` and the
+proxy's content digest. There is nothing to keep in step, because there is
+only one place any of them is written down. What a *model is fed* never
+moves with ``--target`` (D-017): the fit series stays each asset's own
+primary, whatever the cell is scored against.
+
+Each arm needs its own ``--tag``, and the arms that share no cell with the
+primary store want their own ``--out-dir`` as well. **The arms do not score
+the same origins**: a window-1000 cell has 500 fewer origins than its
+window-500 counterpart, so a window-sensitivity comparison must run on the
+intersection of the origins both scored, or report coverage per arm. See
+docs/P3_ABLATION_ARMS.md, which counts what each arm moves and what it costs.
+
 Determinism: this refuses to start unless D-026's kernel pin and D-032's
 thread pin are in force, because both must be set before numpy is imported and
 neither can be repaired from in here. Run it through the Makefile's exports::
@@ -112,9 +137,17 @@ from volbench.benchmarks.manifest_provenance import (  # noqa: E402
     annotate,
     supersede,
 )
-from volbench.data.panel import PanelSeries, build_panel  # noqa: E402
+from volbench.data.panel import (  # noqa: E402
+    CRYPTO_PANEL,
+    FIT_WINDOW_ROBUSTNESS,
+    PRIMARY_TARGET_CRYPTO,
+    TARGET_NAMES,
+    PanelSeries,
+    build_panel,
+)
 from volbench.data.proxies import log_returns  # noqa: E402
 from volbench.determinism import environment_report  # noqa: E402
+from volbench.evaluate import Recondition  # noqa: E402
 from volbench.execute import ProcessExecutor  # noqa: E402
 from volbench.models import (  # noqa: E402
     EWMA,
@@ -164,7 +197,50 @@ DEFAULT_MANIFEST_DIR = Path("docs")
 DEFAULT_TAG = "primary"
 
 SEED = 20260825
+
+#: The headline protocol (D-015, D-018, D-019). Every ablation arm is this
+#: object with one field moved, and the flags that move them default to what
+#: is written here — so a run with no arm flag is the run that produced
+#: ``docs/P3_GRID_manifest.json``, by construction rather than by coincidence.
 ARM = ProtocolArm(label="headline", window=500, refit_every=21, step=1, recondition="daily")
+
+
+def protocol_arm(
+    *,
+    window: int = ARM.window,
+    recondition: Recondition = ARM.recondition,
+    target: str | None = None,
+) -> ProtocolArm:
+    """:data:`ARM` with the ablation settings applied, labelled by what moved.
+
+    The settings themselves are what the config hash records — ``window``
+    through the splitter, ``recondition`` through ``protocol``, and the
+    scoring ``target`` through the cell's ``proxy_name`` and proxy digest.
+    The **label** is the study's handle for the arm and is deliberately not
+    hashed (:class:`~volbench.runner.ProtocolArm`), which is why ``target``
+    may inform it without being a field of the arm: what a run was scored
+    against belongs in the committed manifest's ``arm`` column, where a
+    reader of ``docs/P3_GRID_manifest_<tag>.json`` will look for it, and the
+    label is the only per-cell field free to carry it.
+
+    An arm that moves nothing is ``"headline"`` — the same label the primary
+    grid's 143 cells carry, because it is the same protocol.
+    """
+    varied: list[str] = []
+    if window != ARM.window:
+        varied.append(f"w{window}")
+    if recondition != ARM.recondition:
+        varied.append(f"recondition-{recondition}")
+    if target is not None:
+        varied.append(f"target-{target}")
+    return ProtocolArm(
+        label="+".join(varied) if varied else ARM.label,
+        window=window,
+        refit_every=ARM.refit_every,
+        step=ARM.step,
+        recondition=recondition,
+        invalid_target_policy=ARM.invalid_target_policy,
+    )
 
 
 def manifest_name(tag: str) -> str:
@@ -234,7 +310,7 @@ def model_configs(*, device: str = "cuda") -> list[ModelConfig]:
 # ---------------------------------------------------------------------------
 
 
-def asset_data(series: PanelSeries) -> AssetData:
+def asset_data(series: PanelSeries, target: str | None = None) -> AssetData:
     """One panel series as the runner's inputs, on one calendar.
 
     The leading trim is the same one ``benchmarks.toy.load_series`` applies and
@@ -249,17 +325,37 @@ def asset_data(series: PanelSeries) -> AssetData:
     window containing it. The *proxy* may carry NaNs and does (109 panel days
     whose close printed outside their own session range); those are D-018's
     business and are recorded per row as ``missing_reason``, never dropped.
+
+    ``target`` is the run's **scoring** proxy — D-017's labelled robustness
+    arm — and defaults to the asset's own primary (``overnight_plus_range``
+    on equities per D-016, ``realized_variance`` on crypto per D-004). It
+    moves ``proxy`` and ``proxy_name`` and nothing else: what a variance-fed
+    model is *fitted on* stays the asset's primary whatever the cell is
+    scored against, because the fit input defines what the model forecasts
+    and re-scoring the same forecast against a second proxy is the whole
+    point of the arm (D-017; ``PanelSeries.fit_input``'s docstring says the
+    same thing at the layer below). Both series still come from the one
+    ``targets`` frame on the one calendar, so nothing about the alignment
+    changes.
     """
     returns = log_returns(series.frame.close)
-    target = series.primary  # the asset's own primary: D-016 equity, D-004 crypto
-    if not returns.index.equals(target.index):
-        raise ValueError(f"{series.asset_id}: returns and target are not on one calendar")
+    fit_target = series.primary  # the asset's own primary: D-016 equity, D-004 crypto
+    proxy_name = series.primary_target if target is None else target
+    if proxy_name not in series.targets.columns:
+        raise ValueError(
+            f"{series.asset_id}: unknown target {proxy_name!r}; "
+            f"have {sorted(series.targets.columns)}"
+        )
+    proxy = series.targets[proxy_name]
+    for name, column in (("target", fit_target), ("proxy", proxy)):
+        if not returns.index.equals(column.index):
+            raise ValueError(f"{series.asset_id}: returns and {name} are not on one calendar")
 
     first = returns.first_valid_index()
     if first is None:
         raise ValueError(f"{series.asset_id}: no finite returns")
     keep = returns.index >= first
-    returns, target = returns[keep], target[keep]
+    returns, fit_target, proxy = returns[keep], fit_target[keep], proxy[keep]
 
     values = returns.to_numpy(dtype=np.float64)
     if not np.isfinite(values).all():
@@ -269,9 +365,9 @@ def asset_data(series: PanelSeries) -> AssetData:
     return AssetData(
         asset=series.asset_id,
         returns=returns,
-        proxy=target,
-        proxy_name=series.primary_target,
-        variance=target,
+        proxy=proxy,
+        proxy_name=proxy_name,
+        variance=fit_target,
         data_spec={
             "source": series.source,
             "role": series.role,
@@ -378,11 +474,65 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--assets", nargs="*", default=None, help="default: the whole panel")
     parser.add_argument("--models", nargs="*", default=None, help="default: all 13 configs")
+    parser.add_argument(
+        "--window",
+        type=int,
+        default=ARM.window,
+        help=(
+            f"rolling-origin fit window, in observations (default {ARM.window}, D-019; "
+            f"the robustness arm is {FIT_WINDOW_ROBUSTNESS}). A splitter field, so it is "
+            "in every cell's config hash and the two windows can never share a fragment"
+        ),
+    )
+    parser.add_argument(
+        "--recondition",
+        choices=("daily", "none"),
+        default=ARM.recondition,
+        help=(
+            f"what happens between the {ARM.refit_every}-origin refits (default "
+            f"{ARM.recondition!r}, D-015): 'daily' re-filters the conditional state on "
+            "every origin's window at fixed parameters, 'none' freezes the forecast "
+            "until the next refit. In the config hash whenever refit_every > 1"
+        ),
+    )
+    parser.add_argument(
+        "--target",
+        choices=TARGET_NAMES,
+        default=None,
+        help=(
+            "scoring target for every cell (default: each asset's own primary — "
+            "overnight_plus_range on equities per D-016, realized_variance on crypto "
+            "per D-004). A labelled robustness arm, never a silent default (D-017): it "
+            "re-scores the same forecasts and never changes what a model is fed"
+        ),
+    )
     parser.add_argument("--cpu-workers", type=int, default=12)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--tag", default=DEFAULT_TAG)
     parser.add_argument("--archive-dir", type=Path, default=ARCHIVE_DIR)
     args = parser.parse_args(argv)
+
+    # Checked here rather than after the panel is built: it is a property of
+    # the *panel's* membership, which CRYPTO_PANEL declares and build_panel
+    # reads, and a run should not spend a minute loading archives to be told
+    # its flags contradict D-004.
+    if args.target is not None:
+        selected = set(args.assets) if args.assets else None
+        crypto = sorted(
+            asset
+            for asset in CRYPTO_PANEL
+            if selected is None or asset in selected
+        )
+        if crypto:
+            parser.error(
+                f"--target {args.target} would score {', '.join(crypto)} on a range "
+                f"estimator, but their primary target is {PRIMARY_TARGET_CRYPTO!r} "
+                "(D-004): on a 24/7 market the 'overnight' term of a close-to-close "
+                "estimator is a one-minute gap, and build_crypto_series states in "
+                "terms that the range targets there are diagnostics and not something "
+                "to score against. Restrict the run to the equity assets with "
+                "--assets, which is what the robustness-target arm is."
+            )
 
     if args.tag == DEFAULT_TAG and (args.assets or args.models):
         parser.error(
@@ -411,7 +561,7 @@ def main(argv: list[str] | None = None) -> int:
         missing = set(args.assets) - set(panel)
         if missing:
             raise SystemExit(f"unknown assets: {sorted(missing)}")
-    data = {name: asset_data(series) for name, series in panel.items()}
+    data = {name: asset_data(series, args.target) for name, series in panel.items()}
     print(f"panel: {len(data)} assets in {time.perf_counter() - t0:.1f}s")
     for name, datum in data.items():
         print(f"  {name:9s} n={len(datum.returns):5d}  target={datum.proxy_name}")
@@ -424,15 +574,21 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             raise SystemExit(f"unknown models: {sorted(missing)}")
 
+    arm = protocol_arm(
+        window=args.window, recondition=args.recondition, target=args.target
+    )
     grid = GridSpec(
         assets=tuple(sorted(data)),
         models=tuple(configs),
         horizons=(1,),
-        arms=(ARM,),
+        arms=(arm,),
         seed=SEED,
     )
     print(f"\ngrid: {grid.size} cells "
           f"({len(grid.assets)} assets x {len(grid.models)} configs x 1 horizon x 1 arm)")
+    print(f"arm: {arm.label}  window={arm.window} refit_every={arm.refit_every} "
+          f"step={arm.step} recondition={arm.recondition} "
+          f"invalid_target_policy={arm.invalid_target_policy}")
 
     def progress(outcome: CellOutcome) -> None:
         flag = "" if outcome.status != "failed" else "  <-- FAILED"
@@ -468,6 +624,15 @@ def main(argv: list[str] | None = None) -> int:
 
     summary: dict[str, Any] = {
         "tag": args.tag,
+        "arm": {
+            "label": arm.label,
+            "window": arm.window,
+            "refit_every": arm.refit_every,
+            "step": arm.step,
+            "recondition": arm.recondition,
+            "invalid_target_policy": arm.invalid_target_policy,
+            "target": args.target,
+        },
         "elapsed_s": elapsed,
         "peak_rss_gib": peak_rss_gib(),
         "missing_reasons": reasons,

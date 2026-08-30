@@ -1,0 +1,120 @@
+{
+  "manifest_digest": "db26f976a62a1406a18bc0679a7c82970fd5df631e4493a4b28daa9dc818977d",
+  "store_digest": "a03ccd298170ef8b68c7bfb213adfffde01d913a59444a8e7fc45740277217d1",
+  "supersedes": null,
+  "n_cells": 4,
+  "n_computed": 4,
+  "n_cached": 0,
+  "n_failed": 0,
+  "n_fits": 420,
+  "n_fits_fallback": 0,
+  "environment": {
+    "blas_threads": 1,
+    "thread_pin_explicit": true,
+    "kernel_signature": "4c64e2eacc61926e",
+    "interpreter": {
+      "python": "3.11.5",
+      "implementation": "CPython"
+    },
+    "cpu_count": 32,
+    "env": {
+      "NPY_DISABLE_CPU_FEATURES": "X86_V4 AVX512_ICL AVX512_SPR",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "blas": {
+      "name": "scipy-openblas",
+      "version": "0.3.31.188.0",
+      "openblas configuration": "OpenBLAS 0.3.31.188.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY Haswell MAX_THREADS=64",
+      "detection method": "pkgconfig"
+    },
+    "observed_thread_pools": [
+      {
+        "internal_api": "openblas",
+        "prefix": "libscipy_openblas",
+        "version": "0.3.31.188.0",
+        "num_threads": 1,
+        "threading_layer": "pthreads",
+        "architecture": "Haswell"
+      },
+      {
+        "internal_api": "openblas",
+        "prefix": "libscipy_openblas",
+        "version": "0.3.30",
+        "num_threads": 1,
+        "threading_layer": "pthreads",
+        "architecture": "Haswell"
+      }
+    ]
+  },
+  "cells": [
+    {
+      "index": 0,
+      "asset": "SPY",
+      "model": "autoarima",
+      "horizon": 1,
+      "arm": "w1000",
+      "lane": "cpu",
+      "status": "computed",
+      "config_hash": "166bbf6112fad4da2106fe8a91871b599c01659465375c3dd078d2b158877b19",
+      "n_rows": 4404,
+      "n_missing": 0,
+      "n_fits": 0,
+      "n_fits_fallback": 0,
+      "n_fits_nonconverged": 0,
+      "wall_clock_s": 62.289561,
+      "error": null
+    },
+    {
+      "index": 1,
+      "asset": "SPY",
+      "model": "autoets",
+      "horizon": 1,
+      "arm": "w1000",
+      "lane": "cpu",
+      "status": "computed",
+      "config_hash": "23975f2d1a350ea2ef92adbc29cb93e3ca8a366cc0d823ca09e842ca7ce5a1cf",
+      "n_rows": 4404,
+      "n_missing": 0,
+      "n_fits": 0,
+      "n_fits_fallback": 0,
+      "n_fits_nonconverged": 0,
+      "wall_clock_s": 3.324314,
+      "error": null
+    },
+    {
+      "index": 2,
+      "asset": "SPY",
+      "model": "garch11_t",
+      "horizon": 1,
+      "arm": "w1000",
+      "lane": "cpu",
+      "status": "computed",
+      "config_hash": "8af376d3784f3d91df944d29ed6e8dbecc1a27a25dd353337d389fa2eb69e49e",
+      "n_rows": 4404,
+      "n_missing": 0,
+      "n_fits": 210,
+      "n_fits_fallback": 0,
+      "n_fits_nonconverged": 0,
+      "wall_clock_s": 8.412385,
+      "error": null
+    },
+    {
+      "index": 3,
+      "asset": "SPY",
+      "model": "gjr",
+      "horizon": 1,
+      "arm": "w1000",
+      "lane": "cpu",
+      "status": "computed",
+      "config_hash": "0fff0535fb7df5fedb92156503ad5e216e9a60b321bfe2982c18cbe6cad0985f",
+      "n_rows": 4404,
+      "n_missing": 0,
+      "n_fits": 210,
+      "n_fits_fallback": 0,
+      "n_fits_nonconverged": 0,
+      "wall_clock_s": 5.655328,
+      "error": null
+    }
+  ]
+}
