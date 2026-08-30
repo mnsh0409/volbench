@@ -396,7 +396,7 @@ From the repository root, with the Makefile's determinism exports (D-026's
 kernel pin and D-032's thread pin; the driver refuses to start without them):
 
 ```bash
-cd /home/martin/Documents/IJF/volbench/volbench
+cd "$(git rev-parse --show-toplevel)"   # the repository root: --out-dir is relative to it
 
 # arm 1 — window 1000, all 11 assets, 143 cells
 NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL AVX512_SPR" \
