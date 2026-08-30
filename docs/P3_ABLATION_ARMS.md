@@ -252,7 +252,7 @@ Extrapolated from the smoke runs, and from the one thing the smoke runs alone
 could not answer: **window 1000 is not the primary's runtime with 10% taken
 off.** Fewer origins, but longer fits and a longer TSFM context, and the two
 do not cancel. So the *whole* SPY column was measured at window 1000 — all
-thirteen configs, the four GPU ones included, 9.6 min of probe — against the
+thirteen configs, the four GPU ones included, 9.5 min of probe — against the
 window-500 timings the study already has for the same asset.
 
 | config | lane | w500 s | w1000 s | per cell | **per origin** |
@@ -324,8 +324,8 @@ previous session found this filesystem at 100% with 4.7 G free.
 | arm | fragments | projected | basis |
 |---|---:|---:|---|
 | 1 · window 1000 | 143 pairs | **~88 MiB** | measured: SPY's 13-cell column is 8.80 MiB against 9.77 at window 500, a ratio of 0.901 where the origin ratio is 0.898 — fragment size tracks origins exactly |
-| 2 · `recondition=none` | 143 pairs | **~57–99 MiB** | same origins as the primary's 98.9 MiB, but the frozen forecast repeats for 20 origins out of 21 and parquet compresses it: the 5-cell SPY sample is 2.26 MiB against 3.88 for the same five cells' worth of primary-shaped rows |
-| 3 · three targets | 351 pairs | **~263 MiB** | the primary's 117 equity cells (87.7 MiB) three times; identical row counts, only the proxy and loss columns differ |
+| 2 · `recondition=none` | 143 pairs | **~57–99 MiB** | same origins as the primary's 98.9 MiB, but the frozen forecast repeats for 20 origins out of 21 and parquet compresses it: measured, the 5-cell SPY sample is 2.26 MiB against the primary's own 3.88 MiB for the same five cells, a ratio of 0.58 |
+| 3 · three targets | 351 pairs | **~263 MiB** | the primary's 117 equity cells (87.7 MiB) three times; measured, the 5-cell SPY sample is 3.88 MiB against the primary's 3.88 — identical row counts, only the proxy and loss columns differ |
 | **total** | **637 pairs** | **~410 MiB** | |
 
 The primary store is untouched by all of this: it stays at its 187 fragment
@@ -421,19 +421,18 @@ nohup uv run --extra classical --extra tsfm \
   > data/grid_ablation_recondition_none/run_recondition_none.log 2>&1 &
 
 # arm 3 — the three robustness targets, 9 equity assets, 117 cells each.
-# Three runs into one store; run them in sequence, not together.
-for TARGET in parkinson garman_klass squared_return; do
-  NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL AVX512_SPR" \
-  OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+# One nohup for all three: they share a store and must not overlap on the GPU.
+NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL AVX512_SPR" \
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+nohup bash -c 'for T in parkinson garman_klass squared_return; do
   uv run --extra classical --extra tsfm \
     python -m volbench.benchmarks.grid_primary \
-      --target "$TARGET" \
+      --target "$T" \
       --assets NDX DAX CAC NKX HSI TWSE KOSPI SPY DIA \
-      --tag "target_$TARGET" \
+      --tag "target_$T" \
       --out-dir data/grid_ablation_targets \
-      --cpu-workers 12 \
-    > "data/grid_ablation_targets/run_target_$TARGET.log" 2>&1
-done
+      --cpu-workers 12
+done' > data/grid_ablation_targets/run_targets.log 2>&1 &
 ```
 
 Notes on the shape, all of them checked rather than assumed:
@@ -453,7 +452,9 @@ Notes on the shape, all of them checked rather than assumed:
 - **No `--manifest-dir`.** Each run writes `docs/P3_GRID_manifest_<tag>.json`,
   a committed sibling that is not `docs/P3_GRID_manifest.json` and cannot
   become it: the archive-and-supersede path is keyed on the default tag.
-- **Each `--out-dir` is created by the run** and is under gitignored `/data/`.
+- **Each `--out-dir` already exists** — the smoke runs of §6 created all three —
+  so the log redirections above have somewhere to land. All are under
+  gitignored `/data/`.
   The store lands in `<out-dir>/store`, the run's `summary_<tag>.json` and
   `report_<tag>.txt` beside it.
 - **Watching progress**: `on_cell` fires as a lane's outcomes are *collected*,
